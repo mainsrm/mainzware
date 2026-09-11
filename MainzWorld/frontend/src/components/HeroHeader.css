@@ -1,0 +1,54 @@
+.hero-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 2.5rem 1rem;
+  background:
+    radial-gradient(circle at 18% 28%, rgba(255, 255, 255, 0.65) 0 6%, transparent 7%),
+    radial-gradient(circle at 68% 55%, rgba(255, 255, 255, 0.5) 0 8%, transparent 9%),
+    radial-gradient(circle at 38% 78%, rgba(255, 255, 255, 0.4) 0 10%, transparent 11%),
+    linear-gradient(180deg, #2f6fb3 0%, #4a90d9 45%, #bcd9f2 100%);
+  border-bottom: 4px solid #14202b;
+  overflow: hidden;
+}
+
+@media (max-width: 480px) {
+  .hero-header {
+    padding: 1.5rem 0.5rem;
+  }
+}
+
+.hero-header__title {
+  margin: 0;
+  font-family: 'Arial Black', 'Segoe UI Black', sans-serif;
+  font-style: italic;
+  font-size: clamp(1.5rem, 8vw, 4.5rem);
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: #e8802c;
+  text-shadow: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1.25rem;
+  text-transform: uppercase;
+  /* Solid dark panel behind the text: measured contrast ~5.9:1 (orange on #14202b),
+     vs ~1.9:1 for orange directly on the sky gradient — WCAG 2.1 AA requires 3:1+ here. */
+  background-color: #14202b;
+  padding: 0.5em 0.8em;
+  border-radius: 0.4em;
+  max-width: 100%;
+}
+
+.hero-header__world {
+  display: inline-flex;
+  align-items: center;
+}
+
+.hero-header__globe {
+  font-size: 1.15em !important;
+  color: #ffffff;
+  margin: 0 -0.12em 0 0.02em;
+  vertical-align: middle;
+}

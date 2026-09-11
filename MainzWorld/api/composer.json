@@ -1,0 +1,14 @@
+{
+  "name": "mainzworld/api",
+  "description": "PHP REST API backing the Mainz World React front end.",
+  "type": "project",
+  "require": {
+    "php": ">=8.1",
+    "phpoffice/phpspreadsheet": "^5.9"
+  },
+  "autoload": {
+    "psr-4": {
+      "MainzWorld\\": "src/"
+    }
+  }
+}

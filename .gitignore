@@ -1,0 +1,36 @@
+# macOS / editor noise
+.DS_Store
+.vscode/
+.idea/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.local.*
+*.user
+
+# Runtime logs and scratch files
+*.log
+phpInfo.php
+test.html
+.vite/
+
+# JavaScript / Vite
+node_modules/
+dist/
+!MainzWorld/frontend/public/
+!MainzWorld/frontend/public/.htaccess
+
+# PHP / Composer
+vendor/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated reports and user uploads
+SaleAddressMapper/output/
+MainzWorld/api/public/uploads/
