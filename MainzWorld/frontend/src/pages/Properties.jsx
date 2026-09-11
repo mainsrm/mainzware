@@ -233,7 +233,13 @@ export default function Properties() {
     ? properties
     : activeListProperties;
 
-  const counties = [...new Set(baseProperties.map((property) => property.county).filter(Boolean))].sort();
+  const sourceCounties = sources
+    .map((source) => source.label?.match(/^(.+?)\s+County(?:,|$)/i)?.[1]?.trim())
+    .filter(Boolean);
+  const counties = [...new Set([
+    ...baseProperties.map((property) => property.county).filter(Boolean),
+    ...sourceCounties,
+  ])].sort();
   const visibleProperties = baseProperties
     .filter((property) => countyFilter === 'all' || property.county === countyFilter)
     .sort((left, right) => {

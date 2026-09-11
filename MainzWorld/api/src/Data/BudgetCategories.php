@@ -4,9 +4,42 @@ declare(strict_types=1);
 namespace MainzWorld\Data;
 
 use MainzWorld\Config\Database;
+use PDO;
 
 final class BudgetCategories
 {
+    public static function seedDefaults(PDO $pdo, int $budgetId): void
+    {
+        $stmt = $pdo->prepare(
+            "INSERT INTO budget_categories (budget_id, name, budgeted_amount, sort_order)
+             VALUES (:budget_id, :name, 0, :sort_order)
+             ON CONFLICT (budget_id, name) DO NOTHING"
+        );
+        foreach (self::defaultNames() as $sortOrder => $name) {
+            $stmt->execute(['budget_id' => $budgetId, 'name' => $name, 'sort_order' => $sortOrder]);
+        }
+    }
+
+    private static function defaultNames(): array
+    {
+        return [
+            1 => 'Housing',
+            2 => 'Vehicles',
+            3 => 'Transportation',
+            4 => 'Insurance',
+            5 => 'Utilities',
+            6 => 'Groceries',
+            7 => 'Dining',
+            8 => 'Subscriptions Memberships',
+            9 => 'Giving',
+            10 => 'Household',
+            11 => 'Personal',
+            12 => 'Education (Tuition)',
+            13 => 'Misc',
+            0 => 'Transfer',
+        ];
+    }
+
     public static function all(int $budgetId): array
     {
         $stmt = Database::connection()->prepare(

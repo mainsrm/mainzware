@@ -78,6 +78,9 @@ export default function NavBar() {
             <Tab key={link.to} label={link.label} value={link.to} component={NavLink} to={link.to} />
           ))}
         </Tabs>
+        <Button component={NavLink} to="/" size="small" sx={{ ml: 1, textTransform: 'none' }}>
+          MainzWare
+        </Button>
       </Box>
 
       <Drawer
@@ -123,6 +126,9 @@ export default function NavBar() {
                 <ListItemText primary={link.label} primaryTypographyProps={{ fontWeight: pathname === link.to ? 700 : 500 }} />
               </ListItemButton>
             ))}
+            <ListItemButton component={NavLink} to="/" onClick={() => setMobileNavOpen(false)} sx={{ borderRadius: 2, minHeight: 44 }}>
+              <ListItemText primary="MainzWare" />
+            </ListItemButton>
           </List>
         </Box>
       </Drawer>

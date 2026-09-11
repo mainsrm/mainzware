@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import Home from './pages/Home';
+import Dashboard from './pages/Dashboard';
 import Properties from './pages/Properties';
 import Budget from './pages/Budget';
 import WhereDaMoney from './pages/WhereDaMoney';
@@ -16,6 +17,7 @@ export default function App() {
       <AppShell>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/mainz-world" element={<RequireAuth><Dashboard /></RequireAuth>} />
           <Route path="/properties" element={<RequireAuth><Properties /></RequireAuth>} />
           <Route path="/what-da-money" element={<RequireAuth><Budget /></RequireAuth>} />
           <Route path="/where-da-money" element={<RequireAuth><WhereDaMoney /></RequireAuth>} />

@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 API_DIR="$ROOT_DIR/api"
+SCRAPER_DIR="$ROOT_DIR/../SaleAddressMapper"
 RELEASE_DIR="$(mktemp -d /tmp/mainzware-release.XXXXXX)"
 ARCHIVE="${RELEASE_DIR}.tar.gz"
 REMOTE="${DEPLOY_REMOTE:-root@129.121.142.227}"
@@ -20,9 +21,10 @@ npm --prefix "$FRONTEND_DIR" run build
 printf '%s\n' 'Installing production API dependencies...'
 composer --working-dir="$API_DIR" install --no-dev --prefer-dist --optimize-autoloader --no-interaction
 
-mkdir -p "$RELEASE_DIR/frontend" "$RELEASE_DIR/api"
+mkdir -p "$RELEASE_DIR/frontend" "$RELEASE_DIR/api" "$RELEASE_DIR/SaleAddressMapper"
 rsync -a "$FRONTEND_DIR/dist/" "$RELEASE_DIR/frontend/"
 rsync -a --exclude='.env' --exclude='public/uploads/' "$API_DIR/" "$RELEASE_DIR/api/"
+rsync -a --exclude='.venv/' --exclude='output/' "$SCRAPER_DIR/" "$RELEASE_DIR/SaleAddressMapper/"
 
 tar -czf "$ARCHIVE" -C "$(dirname "$RELEASE_DIR")" "$(basename "$RELEASE_DIR")"
 
@@ -47,6 +49,8 @@ tar -xzf /tmp/mainzware-release.tar.gz -C /tmp/mainzware-extract --strip-compone
 rm -rf "$REMOTE_ROOT/frontend" "$REMOTE_ROOT/api"
 cp -a /tmp/mainzware-extract/frontend "$REMOTE_ROOT/frontend"
 cp -a /tmp/mainzware-extract/api "$REMOTE_ROOT/api"
+rm -rf "$REMOTE_ROOT/SaleAddressMapper"
+cp -a /tmp/mainzware-extract/SaleAddressMapper "$REMOTE_ROOT/SaleAddressMapper"
 
 if [ -f /tmp/mainzware-production.env ]; then
   cp /tmp/mainzware-production.env "$REMOTE_ROOT/api/.env"
@@ -61,6 +65,14 @@ chown root:www-data "$REMOTE_ROOT/api/.env"
 chmod 640 "$REMOTE_ROOT/api/.env"
 chown -R www-data:www-data "$REMOTE_ROOT/api/public/uploads"
 chmod 770 "$REMOTE_ROOT/api/public/uploads"
+
+if [ ! -x "$REMOTE_ROOT/SaleAddressMapper/.venv/bin/python" ]; then
+  apt-get update
+  apt-get install -y python3 python3-venv
+  python3 -m venv "$REMOTE_ROOT/SaleAddressMapper/.venv"
+fi
+"$REMOTE_ROOT/SaleAddressMapper/.venv/bin/pip" install --quiet -r "$REMOTE_ROOT/SaleAddressMapper/requirements.txt"
+"$REMOTE_ROOT/SaleAddressMapper/.venv/bin/python" -m playwright install --with-deps chromium
 
 php-fpm8.3 -t
 nginx -t

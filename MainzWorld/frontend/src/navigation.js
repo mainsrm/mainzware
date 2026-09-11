@@ -1,5 +1,5 @@
 export const NAV_ITEMS = [
-  { to: '/', label: 'Home', description: 'Return to your Mainz World dashboard.' },
+  { to: '/mainz-world', label: 'Mains World', description: 'Return to your private Mains World dashboard.' },
   { to: '/what-da-money', label: 'What Da Money', description: 'Manage budgets, categories, and transactions.' },
   { to: '/where-da-money', label: 'Where Da Money', description: 'Review spending by category and transaction.' },
   { to: '/properties', label: 'Property Sales', description: 'Browse current tax-sale properties and saved lists.' },

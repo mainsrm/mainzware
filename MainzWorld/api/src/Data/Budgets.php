@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace MainzWorld\Data;
 
 use MainzWorld\Config\Database;
+use MainzWorld\Data\BudgetCategories;
 
 final class Budgets
 {
@@ -52,6 +53,7 @@ final class Budgets
                 "INSERT INTO budget_members (budget_id, user_id, permission) VALUES (:budget_id, :user_id, 'owner')"
             );
             $member->execute(['budget_id' => $id, 'user_id' => $ownerId]);
+            BudgetCategories::seedDefaults($pdo, $id);
             $pdo->commit();
             return $id;
         } catch (\Throwable $error) {

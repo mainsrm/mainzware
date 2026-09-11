@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 export default function Login() {
   const { user, status } = useAuth();
   const location = useLocation();
-  const from = location.state?.from || '/what-da-money';
+  const from = location.state?.from || '/mainz-world';
 
   if (status === 'loading') return null;
   if (user) return <Navigate to={from} replace />;
