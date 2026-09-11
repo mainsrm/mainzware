@@ -1,0 +1,551 @@
+/* RESET */
+html, body, div, span, applet, object, iframe, h1, h2, h3, h4, h5, h6, p, blockquote, pre, a, abbr, acronym, address, big, cite, code, del, dfn, em, font, img, ins, kbd, q, s, samp, small, strike, strong, sub, sup, tt, var, b, u, i, center, dl, dt, dd, ol, ul, li, fieldset, form, label, legend, table, caption, tbody, tfoot, thead, tr, th, td {margin:0; padding:0; border:0; outline:0; font-size:100%; vertical-align:baseline; background:transparent;} body {line-height:1;}ol, ul{list-style:display;} blockquote, q{quotes:none;} blockquote:before, blockquote:after, q:before, q:after{content:'';content:none;} :focus{outline:0;} ins{text-decoration:none;} del{text-decoration:line-through;} table{border-collapse:collapse; border-spacing:0;}
+/* MAIN */
+/*
+@font-face {
+ font-family:'AdventPro';
+ src:url('http://www.kirkhopkins.com/LegacyChristianChurch/fonts/AdventPro-Light.ttf') format('truetype');
+ font-weight:bold;
+ font-style:normal;
+}
+*/
+* {
+	box-sizing:border-box;
+	padding:0px;
+	margin:0px;
+	color:#111;
+	font-family:source_sans_prosemibold, sans-serif;
+	font-weight:300;
+	cursor:auto;
+	color:#010101;
+	line-height:1.5em;
+}
+img {
+ width:90%;
+ margin:5%;
+}
+ul {
+	list-style:display;
+	margin-bottom:2em;
+}
+li {
+	margin-top:.5em;
+	margin-left:2em;
+	margin-bottom:.5em;
+	list-style-type:initial;
+}
+table {
+ margin:1em;
+ border-collapse:separate;
+ border-spacing:.1em;
+}
+td, th {
+ padding:.5em;
+}
+tr:nth-child(odd) {
+  background:#efefef;
+}
+
+tr:nth-child(even) {
+  background:#fefefe;
+}
+th {
+ color:#efefef;
+ font-weight:bold;
+ background:#121212;
+}
+details > summary {
+  padding:1em;
+}
+
+h1, h2, h3, h4, h5 {
+ font-weight:600;
+ color:#111;
+ margin-top:.1em;
+ margin-bottom:.1em;
+}
+h1 {
+	font-size:2em;
+	line-height:1.15em;
+	margin-top:1em;
+	margin-bottom:.2em;
+	text-align:center;
+}
+h2 {
+	font-size:1.25em;
+	line-height:1.15em;
+	margin-top:1.3em;
+}
+h3 {
+	font-size:1.01em;
+	line-height:1.01em;
+}
+h4, h5 {
+	font-size:1.00em;
+	line-height:1.00em;
+}
+p {
+	line-height:1.45em;
+	margin-bottom:20px;
+}
+b {
+ color:#03053d;
+ font-weight:bold;
+}
+input[type=text] {
+  padding:1em;
+}
+
+.h2_odd_or_even {
+  margin-top:0;
+  margin-bottom:0;
+}
+
+article {
+  margin:1em;
+  padding:1em;
+  border-radius:5px;
+  background-color:#efefef;
+  border:2px solid #999;
+}
+
+div.odd_or_even {
+  padding:1em;
+  margin:.5em;
+  border:2px solid #000;
+  border-radius:5px;
+}
+div.odd_or_even:nth-child(odd) {
+  background:#f7f7ff;
+}
+div.odd_or_even:nth-child(even) {
+  background:#f7fff7;
+}
+
+.past_events {
+  padding:1em;
+  margin-top:4em;
+  background:#efefef;
+  border:2px solid #000;
+  border-radius:5px;
+}
+
+.home {
+	color:#111;
+	background:#fff;
+	display:block;
+	margin-top:1em;
+	margin-left:1em;
+	padding:1em;
+}
+.home a:hover {
+	color:#fff;
+	background:#222;
+	cursor:pointer;
+	padding:.5em;
+	border:2px solid #000;
+ border-radius:25px;
+ font-size:1.1em;
+}
+
+.show_location {
+	margin-top:1em;
+	margin-bottom:1em;
+}
+
+.thumbnail {
+ width:25%;
+ display:inline;
+}
+
+section {
+	margin:0em auto 0em;
+	position:relative;
+	padding:1em;
+}
+div.favorites, div.main {
+	position:relative;
+	padding:1em;
+}
+
+a {
+ background-color:#03053d;
+ color:#efefef;
+ text-decoration:none;
+ display:inline;
+ padding:.2em;
+ font-family:'karlaregular','AdventPro', sans-serif;
+ font-size:1em;
+ border-radius:5px;
+}
+a:hover {
+ text-decoration:none;
+ color:#fff;
+ background-color:#026307;
+ padding:.2em;
+}
+footer {
+	background-color:#212121;
+	width:100%;
+	float:left;
+	padding:2em;
+	text-align:center;
+}
+footer a {
+	color:#010101;
+	text-decoration:none;
+	padding:1em;
+	background-color:#efefef;
+}
+footer a:hover {
+	cursor:pointer;
+	color:#f5f5f5;
+	background-color:#026307;
+}
+input[type=text], input[type=submit], input[type=password], select, textarea {
+ border:1px solid #000066;
+ border-radius:4px;
+ box-sizing:border-box;
+ background-color:#efefef;
+ color:#000066;
+ display:inline;
+ cursor:pointer;
+ font-size:1.2em;
+ font-family:monospace;
+ white-space:pre;
+ padding:.2em;
+ -webkit-transition:width 0.4s ease-in-out;
+ transition:width 0.4s ease-in-out;
+ width:200px;
+}
+input[type=submit] {
+ margin-top:0em;
+ width:200px;
+}
+input[type=submit]:hover {
+ background-color:#cdcdcd;
+ color:#000011;
+ -webkit-transition:width 0.4s ease-in-out;
+ transition:width 0.4s ease-in-out;
+ width:220px;
+ margin-top:0em;
+}
+input[type=text], textarea:focus {
+ background-color:#dedede;
+ border:2px solid #000033;
+ color:#000011;
+ width:200px;
+}
+
+/* create info */
+input[type=text].create_info
+ ,input[type=submit].create_info
+ ,select.create_info
+ ,textarea.create_info {
+ color:#00f;
+}
+label.create_info {
+ display:block;
+}
+input[type=text].create_info {
+ display:block;
+ margin-top:-1em;
+ width:90%;
+}
+textarea.create_info {
+ width:90%;
+}
+
+/* prayer_vigil */
+label.prayer_vigil_name_label {
+ display:block;
+ margin:0em;
+}
+label.prayer_vigil_email_label {
+ display:none;
+ margin:0em;
+}
+input[type=text].prayer_vigil_name, input[type=text].prayer_vigil_email {
+ display:inline;
+}
+input[type=text].prayer_vigil_name {
+ width:200px;
+}
+input[type=text].prayer_vigil_email {
+ width:350px;
+}
+
+.prayer_vigil_add_to_calendar {
+ display:inline;
+}
+
+.edit_this_information a{
+ background-color:#0c3802;
+ color:#fff;
+ padding:.3em;
+}
+.edit_this_information a:hover {
+ background-color:#186307;
+ color:#efefef;
+}
+
+.remove_this_information a{
+ background-color:#730a02;
+ color:#fff;
+ padding:.3em;
+}
+.remove_this_information a:hover {
+ background-color:#a10d02;
+ color:#efefef;
+}
+
+.cannot_remove_this_information {
+ background-color:#5e2802;
+ color:#fff;
+ padding:.3em;
+}
+
+.success, .removed_record, .error {
+ margin:1em;
+ border-radius:5px;
+ padding:2em;
+ font-size:1.5em;
+}
+
+.success {
+ border:2px solid #01420b;
+ background-color:#bbfcc5;
+}
+.removed_record {
+ border:2px solid #730a02;
+ background-color:#fabeb9;
+}
+.error {
+ border:2px solid #800509;
+ background-color:#fce3e4;
+}
+.new_event_description {
+ margin-left:2em;
+ margin-top:1em;
+ margin-bottom:2em;
+}
+.walk_info {
+ border:3px solid #854c00;
+ background-color:#f7ce97;
+ margin:2em;
+ border-radius:5px;
+ padding:2em;
+ font-size:1em;
+}
+
+pre {
+ white-space:pre-wrap;    /* Since CSS 2.1 */
+ white-space:-moz-pre-wrap;  /* Mozilla, since 1999 */
+ white-space:-pre-wrap;   /* Opera 4-6 */
+ white-space:-o-pre-wrap; /* Opera 7 */
+ word-wrap:break-word;    /* Internet Explorer 5.5+ */
+ font-size:1em;
+}
+/* end of main */
+
+
+
+/* Navigation */
+.top-nav {
+  display:flex;
+  flex-direction:row;
+  align-items:center;
+  justify-content:space-between;
+  background-color:#000;
+  background:linear-gradient(to left, #000, #333);
+  /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+  color:#fff;
+  height:50px;
+  padding:1em;
+}
+.menu {
+  display:flex;
+  flex-direction:row;
+  list-style-type:none;
+  margin:0;
+  padding:0;
+}
+.menu > li {
+  margin:0 1rem;
+  overflow:hidden;
+}
+.menu-button-container {
+  display:none;
+  height:100%;
+  width:30px;
+  cursor:pointer;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+}
+#menu-toggle {
+  display:none;
+}
+.menu-button,
+.menu-button::before,
+.menu-button::after {
+  display:block;
+  background-color:#fff;
+  position:absolute;
+  height:4px;
+  width:30px;
+  transition:transform 400ms cubic-bezier(0.23, 1, 0.32, 1);
+  border-radius:2px;
+}
+.menu-button::before {
+  content:'';
+  margin-top:-8px;
+}
+.menu-button::after {
+  content:'';
+  margin-top:8px;
+}
+#menu-toggle:checked + .menu-button-container .menu-button::before {
+  margin-top:0px;
+  transform:rotate(405deg);
+}
+#menu-toggle:checked + .menu-button-container .menu-button {
+  background:rgba(255, 255, 255, 0);
+}
+#menu-toggle:checked + .menu-button-container .menu-button::after {
+  margin-top:0px;
+  transform:rotate(-405deg);
+}
+
+/* Navigation items */
+.menu > li a {
+  color:#fff;
+  cursor:pointer;
+  padding:.5em;
+  text-decoration:none;
+  font-weight:700;
+  font-size:14px;
+}
+.menu > li a:hover {
+  color:#000000;
+  background-color:#fff;
+  cursor:pointer;
+}
+
+.videoWrapper {
+	 position: relative;
+	 padding-bottom: 56.25%; /* 16:9 */
+	 padding-top: 25px;
+	 height: 0;
+	 margin: 3px 0px 60px 0px;
+}
+.videoWrapper iframe {
+	 position: absolute;
+	 top: 0;
+	 left: 0;
+	 width: 100%;
+	 height: 100%;
+}
+.videotitle {
+	 font-size: 1.05em;
+	 color: #00465c;
+	 line-height: 1.05em;
+	 margin: 10px 0px 4px 0px;
+}
+
+.board_member_table {
+  display:block;
+}
+.board_member_list {
+  display:none;
+}
+
+/* Responsive Design - Smartphone/Tablet size */
+@media screen and (max-width:1000px) {
+  .photo_gallery_thumbnail {
+   width:90%;
+  }
+  .menu-button-container {
+   display:flex;
+  }
+  .menu {
+   position:absolute;
+   top:0;
+   margin-top:50px;
+   left:0;
+   flex-direction:column;
+   width:100%;
+   justify-content:center;
+   align-items:center;
+   z-index:999;
+  }
+  #menu-toggle ~ .menu li {
+   height:0;
+   margin:0;
+   padding:0;
+   border:0;
+   transition:height 400ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  #menu-toggle:checked ~ .menu li {
+   border:1px solid #333;
+   height:3.5em;
+   padding:0.5em;
+   transition:height 400ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  .menu > li {
+   display:flex;
+   justify-content:center;
+   margin:0;
+   padding:0.5em 0;
+   width:100%;
+   color:white;
+   background-color:#222;
+  }
+  .menu > li:not(:last-child) {
+   border-bottom:1px solid #444;
+  }
+  .menu > li a {
+   margin-top:.4em;
+  }
+  
+  .prayer_vigil_add_to_calendar {
+   display:block;
+   margin:2em;
+  }
+
+  input[type=submit] {
+   margin-left:1em;
+   width:90%;
+  }
+  input[type=submit] {
+   margin-top:2em;
+  }
+  input[type=submit]:hover {
+   background-color:#cdcdcd;
+   color:#000011;
+   -webkit-transition:width 0.4s ease-in-out;
+   transition:width 0.4s ease-in-out;
+   width:95%;
+   margin-top:2em;
+  }
+  input[type=text] {
+   padding:1em;
+   margin:1em;
+  }
+  input[type=text].prayer_vigil_name, input[type=text].prayer_vigil_email {
+   display:inline;
+  }
+  input[type=text].prayer_vigil_name {
+   width:90%;
+  }
+  input[type=text].prayer_vigil_email {
+   width:90%;
+  }
+  
+  .board_member_table {
+    display:none;
+  }
+  .board_member_list {
+    display:block;
+  }
+}

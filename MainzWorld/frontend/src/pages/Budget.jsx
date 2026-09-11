@@ -28,6 +28,7 @@ export default function Budget() {
   const [status, setStatus] = useState('ready');
   const [uploadMessage, setUploadMessage] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const [budgets, setBudgets] = useState([]);
   const [budgetId, setBudgetId] = useState('');
   const [newBudgetName, setNewBudgetName] = useState('');
@@ -46,6 +47,12 @@ export default function Budget() {
   const [budgetMembers, setBudgetMembers] = useState([]);
   const [shareableUsers, setShareableUsers] = useState([]);
   const [sharingDetailsLoading, setSharingDetailsLoading] = useState(false);
+  const [receipts, setReceipts] = useState([]);
+  const [expandedReceiptId, setExpandedReceiptId] = useState(null);
+  const [receiptItems, setReceiptItems] = useState([]);
+  const [receiptActionBusy, setReceiptActionBusy] = useState(false);
+  const [newItemDescription, setNewItemDescription] = useState('');
+  const [newItemAmount, setNewItemAmount] = useState('');
   const selectedBudget = budgets.find((budget) => String(budget.id) === String(budgetId));
   const canWrite = selectedBudget?.permission === 'owner' || selectedBudget?.permission === 'editor';
   const sharingMembers = Array.isArray(budgetMembers) ? budgetMembers : [];
@@ -85,6 +92,14 @@ export default function Budget() {
     apiClient.get('/budget/categories', { params: { budget_id: budgetId } }).then((response) => setCategories(response.data));
   };
 
+  const loadReceipts = () => {
+    if (!budgetId) {
+      setReceipts([]);
+      return;
+    }
+    apiClient.get('/budget/receipts', { params: { budget_id: budgetId } }).then((response) => setReceipts(response.data));
+  };
+
   useEffect(loadBudgets, [user]);
   useEffect(() => {
     if (budgetId) {
@@ -95,6 +110,11 @@ export default function Budget() {
     }
   }, [budgetId]);
   useEffect(loadCategories, [budgetId]);
+  useEffect(() => {
+    loadReceipts();
+    setExpandedReceiptId(null);
+    setReceiptItems([]);
+  }, [budgetId]);
   useEffect(() => {
     if (selectedBudget?.permission === 'owner') {
       loadSharingDetails();
@@ -208,6 +228,111 @@ export default function Budget() {
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleReceiptChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+
+    setUploadingReceipt(true);
+    setUploadMessage(null);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('budget_id', budgetId);
+
+    try {
+      // Plain axios (not the shared JSON apiClient) so the browser sets the multipart boundary.
+      await axios.post(`/api/v1/budget/receipts?budget_id=${budgetId}`, formData);
+      setUploadMessage({
+        severity: 'success',
+        text: 'Receipt uploaded. Itemization will appear here once it has been processed.',
+      });
+      loadReceipts();
+    } catch (error) {
+      const text = error.response?.data?.error || 'Receipt upload failed.';
+      setUploadMessage({ severity: 'error', text });
+    } finally {
+      setUploadingReceipt(false);
+    }
+  };
+
+  const toggleReceipt = async (receipt) => {
+    if (expandedReceiptId === receipt.id) {
+      setExpandedReceiptId(null);
+      setReceiptItems([]);
+      return;
+    }
+    const response = await apiClient.get(`/budget/receipts/${receipt.id}`, { params: { budget_id: budgetId } });
+    setExpandedReceiptId(receipt.id);
+    setReceiptItems(response.data.items);
+  };
+
+  const processReceipt = async (receiptId) => {
+    setReceiptActionBusy(true);
+    setUploadMessage(null);
+    try {
+      const response = await apiClient.post(`/budget/receipts/${receiptId}/process`, null, { params: { budget_id: budgetId } });
+      setExpandedReceiptId(receiptId);
+      setReceiptItems(response.data.items);
+      loadReceipts();
+    } catch (error) {
+      setUploadMessage({ severity: 'error', text: error.response?.data?.error || 'Could not process receipt.' });
+    } finally {
+      setReceiptActionBusy(false);
+    }
+  };
+
+  const confirmReceipt = async (receiptId) => {
+    setReceiptActionBusy(true);
+    setUploadMessage(null);
+    try {
+      await apiClient.post(`/budget/receipts/${receiptId}/confirm`, null, { params: { budget_id: budgetId } });
+      setUploadMessage({ severity: 'success', text: 'Receipt confirmed as a transaction.' });
+      setExpandedReceiptId(null);
+      setReceiptItems([]);
+      loadReceipts();
+      loadTransactions();
+    } catch (error) {
+      setUploadMessage({ severity: 'error', text: error.response?.data?.error || 'Could not confirm receipt.' });
+    } finally {
+      setReceiptActionBusy(false);
+    }
+  };
+
+  const refreshReceiptItems = async (receiptId) => {
+    const response = await apiClient.get(`/budget/receipts/${receiptId}`, { params: { budget_id: budgetId } });
+    setReceiptItems(response.data.items);
+  };
+
+  const updateReceiptItem = async (receiptId, item) => {
+    await apiClient.post(`/budget/receipts/${receiptId}/items/${item.id}`, {
+      description: item.description,
+      amount: Number(item.amount),
+      budget_category: item.budget_category,
+    }, { params: { budget_id: budgetId } });
+    refreshReceiptItems(receiptId);
+  };
+
+  const deleteReceiptItem = async (receiptId, itemId) => {
+    await apiClient.delete(`/budget/receipts/${receiptId}/items/${itemId}`, { params: { budget_id: budgetId } });
+    refreshReceiptItems(receiptId);
+  };
+
+  const addReceiptItem = async (receiptId) => {
+    if (!newItemDescription.trim() || !newItemAmount) return;
+    await apiClient.post(`/budget/receipts/${receiptId}/items`, {
+      description: newItemDescription.trim(),
+      amount: Number(newItemAmount),
+    }, { params: { budget_id: budgetId } });
+    setNewItemDescription('');
+    setNewItemAmount('');
+    refreshReceiptItems(receiptId);
+  };
+
+  const updateLocalItemField = (itemId, field, value) => {
+    setReceiptItems((items) => items.map((item) => (item.id === itemId ? { ...item, [field]: value } : item)));
   };
 
   return (
@@ -444,6 +569,21 @@ export default function Budget() {
               </Typography>
             </Stack>
             {uploading && <CircularProgress size={24} aria-label="Importing file" />}
+            <Stack spacing={1} alignItems="flex-start">
+              <Button variant="outlined" component="label" disabled={uploadingReceipt}>
+                {uploadingReceipt ? 'Uploading…' : 'Upload Receipt'}
+                <input
+                  type="file"
+                  hidden
+                  accept=".jpg,.jpeg,.png,.heic,.pdf"
+                  onChange={handleReceiptChange}
+                />
+              </Button>
+              <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400 }}>
+                Snap or upload a receipt photo. Itemization is processed after upload.
+              </Typography>
+            </Stack>
+            {uploadingReceipt && <CircularProgress size={24} aria-label="Uploading receipt" />}
           </>
         ) : user ? (
           <Alert severity="info">This budget is view-only. Ask the owner for editor access to import transactions.</Alert>
@@ -455,6 +595,89 @@ export default function Budget() {
       </Stack>
 
       {uploadMessage && <Alert severity={uploadMessage.severity} sx={{ mb: 2 }}>{uploadMessage.text}</Alert>}
+
+      {user && receipts.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="subtitle1" gutterBottom>Receipts</Typography>
+          <Stack spacing={1}>
+            {receipts.map((receipt) => (
+              <Box key={receipt.id} sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1.5 }}>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+                  <Button size="small" onClick={() => toggleReceipt(receipt)}>
+                    {expandedReceiptId === receipt.id ? 'Hide' : 'View'}
+                  </Button>
+                  <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                    {receipt.merchant || receipt.original_filename}
+                    {receipt.total_amount ? ` — $${Number(receipt.total_amount).toFixed(2)}` : ''}
+                  </Typography>
+                  <Chip size="small" label={receipt.status} color={receipt.status === 'failed' ? 'error' : receipt.status === 'processed' ? 'success' : 'default'} />
+                  {canWrite && receipt.status !== 'processing' && receipt.transaction_id === null && (
+                    <Button size="small" variant="outlined" disabled={receiptActionBusy} onClick={() => processReceipt(receipt.id)}>
+                      {receipt.status === 'processed' ? 'Re-process' : 'Process'}
+                    </Button>
+                  )}
+                  {canWrite && receipt.status === 'processed' && receipt.transaction_id === null && (
+                    <Button size="small" variant="contained" disabled={receiptActionBusy} onClick={() => confirmReceipt(receipt.id)}>
+                      Confirm
+                    </Button>
+                  )}
+                  {receipt.transaction_id !== null && <Chip size="small" label="Linked to transaction" color="success" variant="outlined" />}
+                </Stack>
+
+                {expandedReceiptId === receipt.id && (
+                  <Box sx={{ mt: 1.5 }}>
+                    {receiptItems.length === 0 && (
+                      <Typography variant="caption" color="text.secondary">No line items yet. Process the receipt, or add items manually below.</Typography>
+                    )}
+                    {receiptItems.map((item) => (
+                      <Stack key={item.id} direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+                        <TextField
+                          size="small"
+                          value={item.description}
+                          onChange={(event) => updateLocalItemField(item.id, 'description', event.target.value)}
+                          onBlur={() => canWrite && updateReceiptItem(receipt.id, item)}
+                          disabled={!canWrite}
+                          sx={{ flexGrow: 1 }}
+                        />
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={item.amount}
+                          onChange={(event) => updateLocalItemField(item.id, 'amount', event.target.value)}
+                          onBlur={() => canWrite && updateReceiptItem(receipt.id, item)}
+                          disabled={!canWrite}
+                          sx={{ width: 110 }}
+                        />
+                        <TextField
+                          size="small"
+                          value={item.budget_category || ''}
+                          onChange={(event) => updateLocalItemField(item.id, 'budget_category', event.target.value)}
+                          onBlur={() => canWrite && updateReceiptItem(receipt.id, item)}
+                          disabled={!canWrite}
+                          placeholder="Category"
+                          sx={{ width: 160 }}
+                        />
+                        {canWrite && (
+                          <IconButton size="small" aria-label="Delete item" onClick={() => deleteReceiptItem(receipt.id, item.id)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Stack>
+                    ))}
+                    {canWrite && (
+                      <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                        <TextField size="small" label="Item description" value={newItemDescription} onChange={(event) => setNewItemDescription(event.target.value)} />
+                        <TextField size="small" type="number" label="Amount" value={newItemAmount} onChange={(event) => setNewItemAmount(event.target.value)} sx={{ width: 110 }} />
+                        <Button size="small" onClick={() => addReceiptItem(receipt.id)}>Add item</Button>
+                      </Stack>
+                    )}
+                  </Box>
+                )}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
+      )}
 
       {status === 'loading' && <CircularProgress aria-label="Loading transactions" />}
       {status === 'error' && <Alert severity="error">Could not load transactions from the API.</Alert>}

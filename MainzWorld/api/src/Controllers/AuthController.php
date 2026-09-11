@@ -34,7 +34,14 @@ final class AuthController
         session_regenerate_id(true);
         $_SESSION['user_id'] = $user['id'];
 
-        echo json_encode(['id' => $user['id'], 'username' => $user['username'], 'role' => $user['role']], JSON_THROW_ON_ERROR);
+        // Web clients use the session cookie; the "token" field is for mobile/API clients
+        // that send it back as "Authorization: Bearer <token>".
+        echo json_encode([
+            'id' => $user['id'],
+            'username' => $user['username'],
+            'role' => $user['role'],
+            'token' => Auth::issueToken((int) $user['id']),
+        ], JSON_THROW_ON_ERROR);
     }
 
     public function logout(): void

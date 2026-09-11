@@ -15,8 +15,13 @@ final class Database
         $dbname = getenv('MAINZWORLD_DB_NAME') ?: 'mainzworld';
         $user = getenv('MAINZWORLD_DB_USER');
         $password = getenv('MAINZWORLD_DB_PASSWORD');
+        // Managed hosts (DigitalOcean, AWS, etc.) require TLS; local dev leaves this unset.
+        $sslmode = getenv('MAINZWORLD_DB_SSLMODE') ?: null;
 
         $dsn = "pgsql:host={$host};port={$port};dbname={$dbname}";
+        if ($sslmode !== null && $sslmode !== '') {
+            $dsn .= ";sslmode={$sslmode}";
+        }
 
         return new PDO($dsn, $user ?: null, $password ?: null, [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,

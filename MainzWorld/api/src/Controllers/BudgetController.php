@@ -7,9 +7,13 @@ use MainzWorld\Data\BudgetTransactions;
 use MainzWorld\Data\BudgetCategories;
 use MainzWorld\Data\BudgetCategoryRules;
 use MainzWorld\Data\Budgets;
+use MainzWorld\Data\Receipts;
+use MainzWorld\Data\ReceiptItems;
 use MainzWorld\Data\Users;
 use MainzWorld\Support\Auth;
 use MainzWorld\Support\Categorizer;
+use MainzWorld\Support\ReceiptItemParser;
+use MainzWorld\Support\ReceiptOcr;
 use MainzWorld\Support\TransactionFileParser;
 use Throwable;
 
@@ -17,6 +21,8 @@ final class BudgetController
 {
     private const ALLOWED_EXTENSIONS = ['csv', 'xlsx', 'xls'];
     private const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
+    private const ALLOWED_RECEIPT_EXTENSIONS = ['jpg', 'jpeg', 'png', 'heic', 'pdf'];
+    private const MAX_RECEIPT_BYTES = 10 * 1024 * 1024; // 10 MB
 
     public function index(): void
     {
@@ -248,6 +254,261 @@ final class BudgetController
             'imported' => $importResult['inserted'],
             'skipped_duplicates' => $importResult['skipped_duplicates'],
         ], JSON_THROW_ON_ERROR);
+    }
+
+    // Stores an uploaded receipt photo/PDF and records it as 'pending'. Itemization (OCR
+    // parsing into receipt_items) happens out-of-band via a background worker, not here.
+    public function uploadReceipt(): void
+    {
+        header('Content-Type: application/json');
+
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+
+        $file = $_FILES['file'] ?? null;
+        if ($file === null || $file['error'] !== UPLOAD_ERR_OK) {
+            $this->fail(400, 'No valid file uploaded (field name must be "file").');
+            return;
+        }
+
+        if ($file['size'] > self::MAX_RECEIPT_BYTES) {
+            $this->fail(400, 'File exceeds the 10MB limit.');
+            return;
+        }
+
+        $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        if (!in_array($extension, self::ALLOWED_RECEIPT_EXTENSIONS, true)) {
+            $this->fail(400, 'Only JPG, PNG, HEIC, and PDF receipts are supported.');
+            return;
+        }
+
+        $mimeType = mime_content_type($file['tmp_name']) ?: 'application/octet-stream';
+
+        $uploadsDir = __DIR__ . '/../../public/uploads/receipts/' . $budgetId;
+        if (!is_dir($uploadsDir) && !mkdir($uploadsDir, 0755, true) && !is_dir($uploadsDir)) {
+            $this->fail(500, 'Could not create the upload directory.');
+            return;
+        }
+
+        // Random filename avoids collisions and leaking the original filename in the URL.
+        $storedName = bin2hex(random_bytes(16)) . '.' . $extension;
+        $destination = $uploadsDir . '/' . $storedName;
+        if (!move_uploaded_file($file['tmp_name'], $destination)) {
+            $this->fail(500, 'Could not save the uploaded file.');
+            return;
+        }
+
+        $storagePath = 'uploads/receipts/' . $budgetId . '/' . $storedName;
+        $receiptId = Receipts::create(
+            $budgetId,
+            (int) $user['id'],
+            basename($file['name']),
+            $storagePath,
+            $mimeType,
+            (int) $file['size']
+        );
+
+        echo json_encode(['id' => $receiptId, 'status' => 'pending'], JSON_THROW_ON_ERROR);
+    }
+
+    public function receipts(): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->selectedBudgetId($user['id']);
+        if ($budgetId === null) return;
+        echo json_encode(Receipts::forBudget($budgetId), JSON_THROW_ON_ERROR);
+    }
+
+    public function showReceipt(int $id): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->selectedBudgetId($user['id']);
+        if ($budgetId === null) return;
+
+        $receipt = Receipts::find($id, $budgetId);
+        if ($receipt === null) {
+            $this->fail(404, 'Receipt not found.');
+            return;
+        }
+
+        echo json_encode([
+            'id' => (int) $receipt['id'],
+            'status' => $receipt['status'],
+            'original_filename' => $receipt['original_filename'],
+            'merchant' => $receipt['merchant'],
+            'purchase_date' => $receipt['purchase_date'],
+            'total_amount' => $receipt['total_amount'],
+            'transaction_id' => $receipt['transaction_id'] !== null ? (int) $receipt['transaction_id'] : null,
+            'items' => ReceiptItems::forReceipt($id),
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    // Runs OCR against the stored image and parses candidate line items. Results are
+    // provisional — the caller reviews/edits items before confirmReceipt() turns them
+    // into a budget transaction.
+    public function processReceipt(int $id): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+
+        $receipt = Receipts::find($id, $budgetId);
+        if ($receipt === null) {
+            $this->fail(404, 'Receipt not found.');
+            return;
+        }
+
+        Receipts::markProcessing($id);
+
+        $imagePath = __DIR__ . '/../../public/' . $receipt['storage_path'];
+        try {
+            $rawText = ReceiptOcr::extractText($imagePath);
+            $parsed = ReceiptItemParser::parse($rawText);
+        } catch (Throwable $e) {
+            Receipts::markFailed($id, $e->getMessage());
+            $this->fail(422, 'Could not process receipt: ' . $e->getMessage());
+            return;
+        }
+
+        foreach ($parsed['items'] as &$item) {
+            $classification = Categorizer::classify($item['description']);
+            $item['budget_category'] = $classification['budget_category'] ?? $classification['category'];
+        }
+        unset($item);
+
+        ReceiptItems::insertMany($id, $parsed['items']);
+        Receipts::markProcessed($id, $parsed['merchant'], $parsed['total'], $parsed['purchase_date'], ['text' => $rawText]);
+
+        echo json_encode([
+            'id' => $id,
+            'status' => 'processed',
+            'merchant' => $parsed['merchant'],
+            'total' => $parsed['total'],
+            'purchase_date' => $parsed['purchase_date'],
+            'items' => ReceiptItems::forReceipt($id),
+        ], JSON_THROW_ON_ERROR);
+    }
+
+    public function addReceiptItem(int $receiptId): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+        if (Receipts::find($receiptId, $budgetId) === null) {
+            $this->fail(404, 'Receipt not found.');
+            return;
+        }
+
+        $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+        $description = trim((string) ($body['description'] ?? ''));
+        $amount = (float) ($body['amount'] ?? 0);
+        if ($description === '' || $amount <= 0) {
+            $this->fail(400, 'description and a positive amount are required.');
+            return;
+        }
+
+        $itemId = ReceiptItems::append($receiptId, $description, $amount, $body['budget_category'] ?? null);
+        echo json_encode(['id' => $itemId], JSON_THROW_ON_ERROR);
+    }
+
+    public function updateReceiptItem(int $receiptId, int $itemId): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+        if (Receipts::find($receiptId, $budgetId) === null || !ReceiptItems::belongsToReceipt($itemId, $receiptId)) {
+            $this->fail(404, 'Receipt item not found.');
+            return;
+        }
+
+        $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+        $description = trim((string) ($body['description'] ?? ''));
+        $amount = (float) ($body['amount'] ?? 0);
+        if ($description === '' || $amount <= 0) {
+            $this->fail(400, 'description and a positive amount are required.');
+            return;
+        }
+
+        ReceiptItems::update($itemId, $description, $amount, $body['budget_category'] ?? null);
+        echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
+    }
+
+    public function deleteReceiptItem(int $receiptId, int $itemId): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+        if (Receipts::find($receiptId, $budgetId) === null || !ReceiptItems::belongsToReceipt($itemId, $receiptId)) {
+            $this->fail(404, 'Receipt item not found.');
+            return;
+        }
+
+        ReceiptItems::delete($itemId);
+        echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
+    }
+
+    // Turns a reviewed receipt into a real budget transaction, linked back to the receipt.
+    public function confirmReceipt(int $id): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+        $budgetId = $this->writableBudgetId($user['id']);
+        if ($budgetId === null) return;
+
+        $receipt = Receipts::find($id, $budgetId);
+        if ($receipt === null) {
+            $this->fail(404, 'Receipt not found.');
+            return;
+        }
+        if ($receipt['transaction_id'] !== null) {
+            $this->fail(409, 'Receipt is already linked to a transaction.');
+            return;
+        }
+
+        $items = ReceiptItems::forReceipt($id);
+        if (empty($items)) {
+            $this->fail(400, 'Add at least one line item before confirming.');
+            return;
+        }
+
+        $total = $receipt['total_amount'] !== null ? (float) $receipt['total_amount'] : ReceiptItems::totalFor($id);
+
+        $categoryCounts = [];
+        foreach ($items as $item) {
+            $category = $item['budget_category'] ?? 'Misc';
+            $categoryCounts[$category] = ($categoryCounts[$category] ?? 0) + 1;
+        }
+        arsort($categoryCounts);
+        $dominantCategory = array_key_first($categoryCounts) ?? 'Misc';
+
+        $transactionId = BudgetTransactions::insertManual([
+            'date' => $receipt['purchase_date'] ?? date('Y-m-d'),
+            'description' => 'Receipt: ' . ($receipt['merchant'] ?? $receipt['original_filename']),
+            'merchant' => $receipt['merchant'],
+            'amount' => -abs($total),
+            'category' => $dominantCategory,
+            'budget_category' => $dominantCategory,
+            'account' => null,
+        ], $budgetId);
+
+        Receipts::linkTransaction($id, $transactionId);
+
+        echo json_encode(['transaction_id' => $transactionId], JSON_THROW_ON_ERROR);
     }
 
     public function budgets(): void

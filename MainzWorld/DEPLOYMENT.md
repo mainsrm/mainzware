@@ -21,7 +21,7 @@ This app is expected to be prepared for public release. A web-hosting push must 
 
 - PHP 8.1+ with PDO PostgreSQL enabled.
 - PostgreSQL reachable by the PHP process.
-- Apache rewrite support enabled for both API and frontend route fallback.
+- Nginx configured for both API forwarding and frontend route fallback.
 - API environment variables configured with real values from `api/.env.example`.
 - Database migrations applied in order.
 - Frontend built with `npm ci && npm run build`.
@@ -49,12 +49,12 @@ npm ci
 npm run build
 ```
 
-## Apache Layout
+## Nginx Layout
 
 Recommended same-domain layout:
 
 - frontend document root: `MainzWorld/frontend/dist`
-- API document root or alias: `MainzWorld/api/public` served under `/api`
+- API front controller: `MainzWorld/api/public/index.php` served through PHP-FPM under `/api`
 
 The frontend calls the API with relative `/api/v1` URLs, so same-domain hosting avoids CORS complexity and keeps session cookies straightforward.
 

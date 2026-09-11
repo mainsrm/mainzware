@@ -166,6 +166,46 @@ final class Router
             return;
         }
 
+        if ($method === 'POST' && $path === '/api/v1/budget/receipts') {
+            (new BudgetController())->uploadReceipt();
+            return;
+        }
+
+        if ($method === 'GET' && $path === '/api/v1/budget/receipts') {
+            (new BudgetController())->receipts();
+            return;
+        }
+
+        if ($method === 'GET' && preg_match('#^/api/v1/budget/receipts/(\d+)$#', $path, $m)) {
+            (new BudgetController())->showReceipt((int) $m[1]);
+            return;
+        }
+
+        if ($method === 'POST' && preg_match('#^/api/v1/budget/receipts/(\d+)/process$#', $path, $m)) {
+            (new BudgetController())->processReceipt((int) $m[1]);
+            return;
+        }
+
+        if ($method === 'POST' && preg_match('#^/api/v1/budget/receipts/(\d+)/confirm$#', $path, $m)) {
+            (new BudgetController())->confirmReceipt((int) $m[1]);
+            return;
+        }
+
+        if ($method === 'POST' && preg_match('#^/api/v1/budget/receipts/(\d+)/items$#', $path, $m)) {
+            (new BudgetController())->addReceiptItem((int) $m[1]);
+            return;
+        }
+
+        if ($method === 'POST' && preg_match('#^/api/v1/budget/receipts/(\d+)/items/(\d+)$#', $path, $m)) {
+            (new BudgetController())->updateReceiptItem((int) $m[1], (int) $m[2]);
+            return;
+        }
+
+        if ($method === 'DELETE' && preg_match('#^/api/v1/budget/receipts/(\d+)/items/(\d+)$#', $path, $m)) {
+            (new BudgetController())->deleteReceiptItem((int) $m[1], (int) $m[2]);
+            return;
+        }
+
         if ($method === 'GET' && $path === '/api/v1/market/btc-ichimoku') {
             (new MarketController())->btcIchimoku();
             return;
