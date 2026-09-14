@@ -5,7 +5,7 @@ This app is expected to be prepared for public release. A web-hosting push must 
 ## Required In Git
 
 - `README.md` and this deployment checklist.
-- `.github/agents/*.agent.md` project standards.
+- Repo-root `.github/agents/*.agent.md` project standards.
 - `api/composer.json` and `api/composer.lock`.
 - `api/openapi.yaml`.
 - `api/migrations/*.sql`.

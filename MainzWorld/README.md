@@ -227,7 +227,7 @@ test the new VPS explicitly with `curl --resolve mainzware.com:443:129.121.142.2
 
 ## Agents
 
-This project is built and maintained with a set of specialist agents (see `.github/agents/`):
+This project is built and maintained with a set of specialist agents (see the repo-root `../.github/agents/` directory):
 
 - `research` — investigates best practices, writes notes into `research/*.md`
 - `accessibility` — WCAG 2.1 compliance
