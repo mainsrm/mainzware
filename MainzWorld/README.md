@@ -236,3 +236,4 @@ This project is built and maintained with a set of specialist agents (see `.gith
 - `api` — PHP REST endpoints + OpenAPI/Swagger spec
 - `ui` — React/Vite front-end implementation
 - `devops` — local Apache/PHP/PostgreSQL stack setup
+- `human-use` — maintainability-focused cleanup for readable, editable, easy-to-troubleshoot code

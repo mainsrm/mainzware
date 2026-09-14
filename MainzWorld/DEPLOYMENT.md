@@ -65,4 +65,4 @@ cd MainzWorld/frontend && npm run build
 cd ../api && php -l public/index.php && find src -name '*.php' -print0 | xargs -0 -n1 php -l
 ```
 
-Before public launch, run the accessibility, web-security, database, API, UI, and DevOps review agents. High and medium findings are release blockers.
+Before public launch, run the accessibility, web-security, database, API, UI, DevOps, and human-use review agents. High and medium findings are release blockers.
