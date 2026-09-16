@@ -34,5 +34,5 @@ GRANT SELECT, INSERT, UPDATE ON sale_properties TO mainzworld_scraper;
 GRANT USAGE, SELECT ON SEQUENCE sale_properties_id_seq TO mainzworld_scraper;
 
 -- schema_migrations must already exist (migrate_db.php creates it on first run).
-INSERT INTO schema_migrations (filename) VALUES ('manual/scoped_scraper_role.sql')
+INSERT INTO public.schema_migrations (filename) VALUES ('manual/scoped_scraper_role.sql')
 ON CONFLICT (filename) DO NOTHING;

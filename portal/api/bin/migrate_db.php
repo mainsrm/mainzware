@@ -7,12 +7,15 @@ use MainzWorld\Config\Database;
 
 try {
     $pdo = Database::connection();
-    $pdo->exec('CREATE TABLE IF NOT EXISTS schema_migrations (
+    // Always schema-qualified: once a search_path with other schemas exists, an
+    // unqualified CREATE would make a second, empty tracking table and replay
+    // every migration from 001 against schemas that already hold live data.
+    $pdo->exec('CREATE TABLE IF NOT EXISTS public.schema_migrations (
         filename TEXT PRIMARY KEY,
         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )');
 
-    $applied = $pdo->query('SELECT filename FROM schema_migrations')
+    $applied = $pdo->query('SELECT filename FROM public.schema_migrations')
         ->fetchAll(PDO::FETCH_COLUMN);
 
     $dir = dirname(__DIR__) . '/db_migrations';
@@ -30,7 +33,7 @@ try {
         $pdo->beginTransaction();
         try {
             $pdo->exec(file_get_contents($path));
-            $pdo->prepare('INSERT INTO schema_migrations (filename) VALUES (:filename)')
+            $pdo->prepare('INSERT INTO public.schema_migrations (filename) VALUES (:filename)')
                 ->execute(['filename' => $name]);
             $pdo->commit();
             $ran++;

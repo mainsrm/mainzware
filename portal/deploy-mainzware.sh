@@ -67,7 +67,7 @@ if [ -d "$STAGING_DIR/uploads" ]; then
 fi
 
 if [ -f "$REMOTE_ROOT/api/.env" ]; then
-  (set -a; . "$REMOTE_ROOT/api/.env"; set +a; php "$REMOTE_ROOT/api/bin/migrate_db.php")
+  (set -a; . "$REMOTE_ROOT/api/.env"; set +a; php "$REMOTE_ROOT/api/bin/check_env.php" && php "$REMOTE_ROOT/api/bin/migrate_db.php")
 else
   echo "WARNING: $REMOTE_ROOT/api/.env not found; skipping migrations (create it and rerun migrate_db.php manually)." >&2
 fi
