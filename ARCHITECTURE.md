@@ -70,6 +70,16 @@ Mirror the product boundaries with PostgreSQL schemas instead of one flat
 highest-risk change (production data lives in `public` today) and is deferred
 until the product structure is stable and budgeteer's data model is decided.
 
+**Prerequisite to fold into that same session:** split the migration credential
+from the runtime credential. Prod's `public` tables/sequences are currently
+owned by `mainzworld_app` (done 2026-09-16 so deploys can migrate unattended),
+which means the credential the web app uses on every request can also
+`ALTER`/`DROP` tables. The fix is a separate owner/migrator role used only by
+`migrate_db.php`, with `mainzworld_app` dropped back to row-level DML. It is
+deliberately **not** done standalone because it re-owns every object — the same
+surgery Phase 7 already performs — and doing it twice doubles the risk on the
+repo's highest-risk area. See `.github/agents/knowledgebase/db-migrations.md`.
+
 ## Migration status
 
 | From | To | Status |
