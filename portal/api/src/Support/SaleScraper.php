@@ -278,6 +278,7 @@ final class SaleScraper
             'MAINZWORLD_DB_HOST', 'MAINZWORLD_DB_PORT', 'MAINZWORLD_DB_NAME',
             'MAINZWORLD_DB_USER', 'MAINZWORLD_DB_PASSWORD', 'MAINZWORLD_DB_SSLMODE',
             'MAINZWORLD_SCRAPER_DIR', 'MAINZWORLD_PHP_BINARY', 'MAINZWORLD_SALE_SOURCES',
+            'MAINZWORLD_SCRAPER_DB_USER', 'MAINZWORLD_SCRAPER_DB_PASSWORD',
         ];
         foreach ($passthrough as $key) {
             $value = getenv($key);
