@@ -36,11 +36,29 @@ The service runs `api/bin/refresh-properties.php`, which calls
 - For each source URL, skips it if `sale_properties.scraped_at::date =
   CURRENT_DATE` already for that URL — i.e. **each county only actually gets
   scraped once per calendar day**, even though the timer checks hourly.
+- **Exception:** a source with `scrape_state = 'queued'` is always scraped,
+  even if it already ran today. Saving a source in the admin UI queues it and
+  dispatches a background worker, so a newly added county populates right away
+  instead of waiting for the next day's tick.
 - The first hourly tick after midnight (whenever that happens to land, per the
   drift above) is what triggers that day's actual scrape for each source.
 - A file lock (`sys_get_temp_dir()/mainzworld_sale_scrape.lock`) prevents
   overlapping scrape runs if the timer fires while a previous run is still
   in-flight.
+
+## Scrape state (added with the non-blocking scrape)
+
+`scrape_sources.scrape_state` tracks one of `idle | queued | running | error`.
+The API never scrapes inside the request: it marks sources `queued`, spawns a
+detached worker, and returns immediately. The worker moves each source
+`running` → `idle` (success, sets `last_scraped_at`) or `error` (sets
+`last_scrape_error`). The admin UI polls `/scrape-sources` while anything is
+`queued`/`running` and shows per-source status.
+
+Spawned children get an explicit allow-listed environment (DB config +
+`MAINZWORLD_SCRAPER_DIR`), because Apache `SetEnv` values are per-request
+FastCGI params that a child process does not reliably inherit. The JWT secret
+is deliberately **not** passed to children.
 
 ## Net effect
 

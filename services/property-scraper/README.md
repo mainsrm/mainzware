@@ -8,7 +8,7 @@ quickly eyeball the area instead of manually looking up each address.
 ## Setup
 
 ```bash
-cd SaleAddressMapper
+cd services/property-scraper
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

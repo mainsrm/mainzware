@@ -10,13 +10,13 @@ final class ScrapeSources
     public static function all(): array
     {
         $stmt = Database::connection()->query(
-                'SELECT ss.id, ss.vendor, ss.label, ss.url, ss.is_active,
+                'SELECT ss.id, ss.vendor, ss.label, ss.url, ss.is_active, ss.scrape_state,
                     COALESCE(ss.last_scraped_at, MAX(sp.scraped_at)) AS last_scraped_at,
                     COALESCE(ss.last_scrape_count, COUNT(sp.id)) AS last_scrape_count,
                     ss.last_scrape_error
                  FROM scrape_sources ss
                  LEFT JOIN sale_properties sp ON sp.source_url = ss.url
-                 GROUP BY ss.id, ss.vendor, ss.label, ss.url, ss.is_active,
+                 GROUP BY ss.id, ss.vendor, ss.label, ss.url, ss.is_active, ss.scrape_state,
                       ss.last_scraped_at, ss.last_scrape_count, ss.last_scrape_error
              ORDER BY ss.id'
         );

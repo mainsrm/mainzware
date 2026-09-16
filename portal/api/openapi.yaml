@@ -42,11 +42,11 @@ paths:
         '403':
           description: Admin role required
     post:
-      summary: Add an SRI county scrape URL (admin only)
+      summary: Add an SRI county scrape URL and queue a background scrape (admin only)
       operationId: createScrapeSource
       responses:
         '200':
-          description: Source created
+          description: Source created; scrape queued to a background worker
         '400':
           description: Invalid SRI URL or label
   /scrape-sources/{id}:
@@ -64,7 +64,7 @@ paths:
           description: Source removed
   /property-sources:
     post:
-      summary: Save SRI and GIS property sources and scrape submitted SRI sources (admin only)
+      summary: Save SRI and GIS property sources and queue a background scrape of submitted SRI sources (admin only)
       operationId: createPropertySources
       requestBody:
         required: true
@@ -92,7 +92,7 @@ paths:
                     $ref: '#/components/schemas/GisSource'
       responses:
         '200':
-          description: Sources saved and SRI scrape results returned
+          description: Sources saved and SRI scrape queued (returns immediately; poll /scrape-sources for status)
         '400':
           description: Invalid source payload
         '401':

@@ -54,12 +54,12 @@ final class PropertySourcesController
 
         try {
             $saved = PropertySources::save($validatedSri, $validatedGis);
-            $scrape = SaleScraper::scrapeSources($saved['sri_urls']);
+            $queued = SaleScraper::queueAndDispatch($saved['sri_urls']);
             echo json_encode([
                 'sri_ids' => $saved['sri_ids'],
                 'gis_ids' => $saved['gis_ids'],
-                'scrape_started' => $saved['sri_urls'] !== [],
-                'scrape' => $scrape,
+                'scrape_queued' => $queued > 0,
+                'queued_count' => $queued,
             ], JSON_THROW_ON_ERROR);
         } catch (\PDOException $error) {
             if ($error->getCode() === '23505') {

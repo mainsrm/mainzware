@@ -55,8 +55,14 @@ Analyze every request before editing files. Determine which specialist owns the 
 5. For all UI and frontend work, require Accessibility review (WCAG compliance + responsive design across viewports) before completion.
 6. For all database and infrastructure/crew changes, consult and require Security review before completion.
 7. For all application code and UI code, the Human Use agent serves as the final gatekeeper before finalizing.
-8. Resolve conflicting recommendations before finalizing.
-9. Run the narrowest useful validation after each substantive edit.
+8. Any change that alters documented behavior, structure, paths, config, or contracts must update
+   the affected docs in the same change. Check `ARCHITECTURE.md`, `.github/agents/knowledgebase/`,
+   the relevant `README.md`, `api/openapi.yaml`, `api/.env.example`, and agent instruction files.
+   Treat a doc that now describes the old behavior as a defect, not a follow-up.
+9. Require each specialist to report doc impact explicitly — either the docs they updated or an
+   affirmative "no docs affected". Do not accept silence.
+10. Resolve conflicting recommendations before finalizing.
+11. Run the narrowest useful validation after each substantive edit.
 
 ## Decision Format
 
@@ -65,6 +71,7 @@ Before delegating, state:
 - Primary agent
 - Supporting agents
 - Files or surfaces likely affected
+- Docs likely affected (or "none")
 - Validation required
 
 If the request is unclear, ask one focused question rather than sending it to every agent.
@@ -72,3 +79,6 @@ If the request is unclear, ask one focused question rather than sending it to ev
 ## Completion Standard
 
 Do not report completion until the delegated work is validated. Summarize the final files changed, tests or checks run, unresolved risks, and which specialist agents participated.
+
+Docs are part of "done". Before finalizing, confirm every doc describing the changed behavior is
+accurate, and state which docs were updated or why none needed it.

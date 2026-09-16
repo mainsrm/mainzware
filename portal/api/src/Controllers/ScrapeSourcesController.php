@@ -39,13 +39,8 @@ final class ScrapeSourcesController
 
         try {
             $id = ScrapeSources::create($label, $url, $vendor);
-            echo json_encode(['id' => $id, 'scrape_started' => true], JSON_THROW_ON_ERROR);
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            }
-            ignore_user_abort(true);
-            set_time_limit(150);
-            SaleScraper::refreshStaleSources();
+            $queued = SaleScraper::queueAndDispatch([$url]);
+            echo json_encode(['id' => $id, 'scrape_queued' => $queued > 0], JSON_THROW_ON_ERROR);
         } catch (\PDOException $error) {
             if ($error->getCode() === '23505') {
                 http_response_code(409);

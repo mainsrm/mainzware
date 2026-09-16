@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Table from '@mui/material/Table';
 import TableBody from '@mui/material/TableBody';
 import TableCell from '@mui/material/TableCell';
@@ -152,10 +152,9 @@ export default function Properties() {
     try {
       const response = await apiClient.post('/property-sources', payload);
       await refreshSourcesAndProperties();
-      const scrape = response.data.scrape || {};
-      const scrapeStatus = response.data.scrape_started
-        ? `Scrape started: ${scrape.completed || 0} of ${scrape.requested || 0} completed.`
-        : 'No scrape was started.';
+      const scrapeStatus = response.data.scrape_queued
+        ? 'Scrape queued — status updates below as it runs.'
+        : 'No scrape was queued.';
       setSourceMessage({ severity: 'success', text: `Sources saved. ${scrapeStatus}` });
       setSourceLabel('');
       setSourceUrl('');
@@ -174,6 +173,28 @@ export default function Properties() {
     await apiClient.delete(`/scrape-sources/${source.id}`);
     setSources((current) => current.filter((item) => item.id !== source.id));
   };
+
+  const scrapeInProgress = sources.some(
+    (source) => source.scrape_state === 'queued' || source.scrape_state === 'running',
+  );
+
+  // While any source is queued/running, poll its status so the UI reflects progress.
+  useEffect(() => {
+    if (user?.role !== 'admin' || !scrapeInProgress) return undefined;
+    const interval = setInterval(() => {
+      apiClient.get('/scrape-sources').then((response) => setSources(response.data)).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [scrapeInProgress, user]);
+
+  // When a scrape finishes, pull in any newly imported properties.
+  const wasScrapingRef = useRef(false);
+  useEffect(() => {
+    if (wasScrapingRef.current && !scrapeInProgress) {
+      apiClient.get('/properties').then((response) => setProperties(response.data)).catch(() => {});
+    }
+    wasScrapingRef.current = scrapeInProgress;
+  }, [scrapeInProgress]);
 
   const toggleSelected = (propertyId) => {
     setSelectedIds((current) => {
@@ -381,13 +402,22 @@ export default function Properties() {
                   <TextField size="small" label="GIS URL" value={gisUrl} onChange={(event) => setGisUrl(event.target.value)} sx={{ minWidth: { xs: '100%', sm: 280 } }} disabled={savingSources} />
                 </Stack>
               </Box>
-              <Stack spacing={0.5} sx={{ mt: 2 }}>
+              <Stack spacing={0.5} sx={{ mt: 2 }} role="status" aria-live="polite">
                 {sources.map((source) => (
                   <Stack key={source.id} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ xs: 'stretch', sm: 'center' }}>
                     <Typography variant="body2" sx={{ minWidth: 0, flex: '1 1 10rem', overflowWrap: 'anywhere' }}>{source.label}</Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 0, flex: '1 1 10rem', overflowWrap: 'anywhere' }}>
-                      {source.last_scraped_at ? `Last refresh: ${new Date(source.last_scraped_at).toLocaleString()}` : 'Not scraped yet'}
-                    </Typography>
+                    <Box sx={{ minWidth: 0, flex: '1 1 10rem', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 0.5 }}>
+                      {source.scrape_state === 'queued' && <Chip size="small" variant="outlined" label="Queued" />}
+                      {source.scrape_state === 'running' && (
+                        <Chip size="small" variant="outlined" color="info" icon={<CircularProgress size={14} aria-hidden="true" />} label="Scraping…" />
+                      )}
+                      {source.scrape_state === 'error' && <Chip size="small" variant="outlined" color="error" label="Scrape failed" />}
+                      {source.scrape_state !== 'queued' && source.scrape_state !== 'running' && (
+                        <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>
+                          {source.last_scraped_at ? `Last refresh: ${new Date(source.last_scraped_at).toLocaleString()}` : 'Not scraped yet'}
+                        </Typography>
+                      )}
+                    </Box>
                     <Button size="small" color="error" onClick={() => removeSource(source)}>Remove</Button>
                   </Stack>
                 ))}

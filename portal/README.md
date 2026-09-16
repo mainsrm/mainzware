@@ -1,9 +1,9 @@
-# Mainz World
+# MainzWare Portal
 
-A local project hub with an API-driven architecture: a React SPA front end talks to a PHP REST
-API (documented with OpenAPI/Swagger), which talks to PostgreSQL. Visiting the site shows a
-landing page linking to every project in this workspace (react-crash-2021, SaleAddressMapper,
-Budget Notebook, etc.).
+The MainzWare staff portal: a React SPA front end talks to a PHP REST API (documented with
+OpenAPI/Swagger), which talks to PostgreSQL. It hosts the behind-authentication back-office
+(properties, budget, projects) and currently also serves the public MainzWare homepage.
+See [ARCHITECTURE.md](../ARCHITECTURE.md) for how this fits the wider monorepo.
 
 See [PRODUCT_VISION.md](PRODUCT_VISION.md) for the roadmap: the budgeting feature here is
 becoming **Budgeteer**, a standalone web + mobile budgeting product with receipt-photo

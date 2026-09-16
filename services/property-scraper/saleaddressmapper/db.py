@@ -17,7 +17,8 @@ def _connection_params() -> dict:
         "host": os.environ.get("MAINZWORLD_DB_HOST", "127.0.0.1"),
         "port": os.environ.get("MAINZWORLD_DB_PORT", "5432"),
         "dbname": os.environ.get("MAINZWORLD_DB_NAME", "mainzworld"),
-        "user": os.environ.get("MAINZWORLD_DB_USER", "mainzworld_app"),
+        # Unset means "let libpq use the OS user", matching the PHP API's PDO behaviour.
+        "user": os.environ.get("MAINZWORLD_DB_USER") or None,
         "password": os.environ.get("MAINZWORLD_DB_PASSWORD") or None,
     }
 
