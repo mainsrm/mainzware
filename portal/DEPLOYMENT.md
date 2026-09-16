@@ -27,6 +27,26 @@ This app is expected to be prepared for public release. A web-hosting push must 
 - Frontend built with `npm ci && npm run build`.
 - API dependencies installed with `composer install --no-dev --prefer-dist --optimize-autoloader`.
 
+### Adding a new environment variable
+
+`deploy-mainzware.sh` preserves the host's `api/.env` across deploys, so a new
+variable added to `api/.env.example` is **never** copied to production — it has
+to be appended to `/var/www/mainzware/api/.env` by hand, followed by
+`systemctl restart php8.3-fpm`.
+
+This bites silently: code that falls back to a default when the variable is
+missing keeps "working" while doing the wrong thing. `MAINZWORLD_SCRAPER_DIR`
+was absent from prod for an unknown period, so `SaleScraper` fell back to a
+repo-relative path that doesn't exist on the VPS and every scheduled scrape
+quietly did nothing. After adding a variable, diff the two files:
+
+```bash
+ssh root@<host> "grep -o '^[A-Z_]*' /var/www/mainzware/api/.env | sort" > /tmp/prod-env-keys
+grep -o '^[A-Z_]*' portal/api/.env.example | sort | comm -23 - /tmp/prod-env-keys
+```
+
+Anything printed is in the example but missing from production.
+
 ## Generated Artifacts
 
 These are required in the deployed runtime but intentionally ignored by Git:
