@@ -20,6 +20,8 @@ import Fab from '@mui/material/Fab';
 import AddIcon from '@mui/icons-material/Add';
 import SaveIcon from '@mui/icons-material/Save';
 import DeleteIcon from '@mui/icons-material/Delete';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { visuallyHidden } from '@mui/utils';
 import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import Box from '@mui/material/Box';
@@ -36,9 +38,33 @@ function firstParcelToken(parcel) {
   return (parcel || '').trim().split(/\s+/)[0];
 }
 
+// The scraper records states as full names ("Indiana") while GIS sources are
+// saved as USPS codes ("IN"), so both sides are normalized before matching.
+const STATE_CODES = {
+  alabama: 'al', alaska: 'ak', arizona: 'az', arkansas: 'ar', california: 'ca',
+  colorado: 'co', connecticut: 'ct', delaware: 'de', 'district of columbia': 'dc',
+  florida: 'fl', georgia: 'ga', hawaii: 'hi', idaho: 'id', illinois: 'il',
+  indiana: 'in', iowa: 'ia', kansas: 'ks', kentucky: 'ky', louisiana: 'la',
+  maine: 'me', maryland: 'md', massachusetts: 'ma', michigan: 'mi', minnesota: 'mn',
+  mississippi: 'ms', missouri: 'mo', montana: 'mt', nebraska: 'ne', nevada: 'nv',
+  'new hampshire': 'nh', 'new jersey': 'nj', 'new mexico': 'nm', 'new york': 'ny',
+  'north carolina': 'nc', 'north dakota': 'nd', ohio: 'oh', oklahoma: 'ok',
+  oregon: 'or', pennsylvania: 'pa', 'rhode island': 'ri', 'south carolina': 'sc',
+  'south dakota': 'sd', tennessee: 'tn', texas: 'tx', utah: 'ut', vermont: 'vt',
+  virginia: 'va', washington: 'wa', 'west virginia': 'wv', wisconsin: 'wi', wyoming: 'wy',
+};
+
+function normalizeState(state) {
+  const value = (state || '').trim().toLowerCase();
+  return STATE_CODES[value] || value;
+}
+
+function gisSourceKey(county, state) {
+  return `${(county || '').trim().toLowerCase()}|${normalizeState(state)}`;
+}
+
 function parcelGisUrl(county, state, gisSources) {
-  const key = `${(county || '').toLowerCase()}|${(state || '').toLowerCase()}`;
-  return gisSources[key] || null;
+  return gisSources[gisSourceKey(county, state)] || null;
 }
 
 export default function Properties() {
@@ -64,10 +90,9 @@ export default function Properties() {
   const [sourceMessage, setSourceMessage] = useState(null);
   const [savingSources, setSavingSources] = useState(false);
   const [gisSources, setGisSources] = useState({});
-  const [gisCounty, setGisCounty] = useState('');
-  const [gisState, setGisState] = useState('IN');
   const [gisUrl, setGisUrl] = useState('');
   const [sourceManagerOpen, setSourceManagerOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -97,20 +122,22 @@ export default function Properties() {
     }
     apiClient.get('/gis-sources').then((response) => {
       setGisSources(Object.fromEntries(response.data.map((source) => [
-        `${source.county.toLowerCase()}|${source.state.toLowerCase()}`, source.url,
+        gisSourceKey(source.county, source.state), source.url,
       ])));
     }).catch(() => {});
   }, [user]);
 
-  const generateSriUrl = () => {
+  // The SRI URL and label are derived from the county/state pair so the county
+  // is only ever typed once; editing them directly stays possible under Advanced.
+  useEffect(() => {
     const county = sourceCounty.trim();
     const state = sourceState.trim().toUpperCase();
     if (!county || !state) return;
     setSourceUrl(
       `https://sriservices.com/properties?saleId=1356&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates`,
     );
-    if (!sourceLabel) setSourceLabel(`${county} County, ${state}`);
-  };
+    setSourceLabel(`${county} County, ${state}`);
+  }, [sourceCounty, sourceState]);
 
   const refreshSourcesAndProperties = async () => {
     const [sriResponse, gisResponse, propertiesResponse] = await Promise.all([
@@ -120,33 +147,31 @@ export default function Properties() {
     ]);
     setSources(sriResponse.data);
     setGisSources(Object.fromEntries(gisResponse.data.map((source) => [
-      `${source.county.toLowerCase()}|${source.state.toLowerCase()}`, source.url,
+      gisSourceKey(source.county, source.state), source.url,
     ])));
     setProperties(propertiesResponse.data);
   };
 
   const addSources = async (event) => {
     event.preventDefault();
-    const hasSriFields = sourceLabel.trim() || sourceUrl.trim() || sourceCounty.trim();
-    const hasGisFields = gisCounty.trim() || gisUrl.trim();
-    if (!hasSriFields && !hasGisFields) {
-      setSourceMessage({ severity: 'error', text: 'Enter an SRI source, a GIS source, or both.' });
+    const county = sourceCounty.trim();
+    const state = sourceState.trim().toUpperCase();
+    const sriUrl = sourceUrl.trim();
+    const gis = gisUrl.trim();
+
+    if (!county || !state) {
+      setSourceMessage({ severity: 'error', text: 'Enter a county and state.' });
       return;
     }
-    if (hasSriFields && (!sourceLabel.trim() || !sourceUrl.trim())) {
-      setSourceMessage({ severity: 'error', text: 'SRI sources require a label and complete URL.' });
-      return;
-    }
-    if (hasGisFields && (!gisCounty.trim() || !gisState.trim() || !gisUrl.trim())) {
-      setSourceMessage({ severity: 'error', text: 'GIS sources require a county, state, and URL.' });
+    if (!sriUrl) {
+      setSourceMessage({ severity: 'error', text: 'No SRI URL was generated — add one under Advanced.' });
       return;
     }
 
-    const payload = {};
-    if (hasSriFields) payload.sri = { label: sourceLabel.trim(), url: sourceUrl.trim(), vendor: 'SRI' };
-    if (hasGisFields) payload.gis = {
-      county: gisCounty.trim(), state: gisState.trim().toUpperCase(), url: gisUrl.trim(),
+    const payload = {
+      sri: { label: sourceLabel.trim() || `${county} County, ${state}`, url: sriUrl, vendor: 'SRI' },
     };
+    if (gis) payload.gis = { county, state, url: gis };
 
     setSavingSources(true);
     try {
@@ -155,11 +180,13 @@ export default function Properties() {
       const scrapeStatus = response.data.scrape_queued
         ? 'Scrape queued — status updates below as it runs.'
         : 'No scrape was queued.';
-      setSourceMessage({ severity: 'success', text: `Sources saved. ${scrapeStatus}` });
+      setSourceMessage({
+        severity: 'success',
+        text: `${county} County, ${state} saved${gis ? ' with its GIS lookup' : ''}. ${scrapeStatus}`,
+      });
       setSourceLabel('');
       setSourceUrl('');
       setSourceCounty('');
-      setGisCounty('');
       setGisUrl('');
     } catch (error) {
       setSourceMessage({ severity: 'error', text: error.response?.data?.error || 'Could not save sources.' });
@@ -171,7 +198,7 @@ export default function Properties() {
   const removeSource = async (source) => {
     if (!window.confirm(`Remove ${source.label}?`)) return;
     await apiClient.delete(`/scrape-sources/${source.id}`);
-    setSources((current) => current.filter((item) => item.id !== source.id));
+    await refreshSourcesAndProperties();
   };
 
   const scrapeInProgress = sources.some(
@@ -281,6 +308,14 @@ export default function Properties() {
     ? properties
     : activeListProperties;
 
+  // Live example of the expected GIS URL shape, built from what's typed so far;
+  // wthgis.com is a common vendor, not a guarantee for every county.
+  const gisCountySlug = sourceCounty.trim().toLowerCase().replace(/[^a-z]/g, '');
+  const gisStateSlug = sourceState.trim().toLowerCase().replace(/[^a-z]/g, '');
+  const gisUrlPlaceholder = gisCountySlug && gisStateSlug
+    ? `https://${gisCountySlug}${gisStateSlug}.wthgis.com/`
+    : 'https://fayettein.wthgis.com/';
+
   const sourceCounties = sources
     .map((source) => source.label?.match(/^(.+?)\s+County(?:,|$)/i)?.[1]?.trim())
     .filter(Boolean);
@@ -314,6 +349,7 @@ export default function Properties() {
   );
 
   const copyParcelForSafari = (parcel) => {
+    const previouslyFocused = document.activeElement;
     const textArea = document.createElement('textarea');
     textArea.value = parcel;
     textArea.setAttribute('readonly', '');
@@ -331,32 +367,63 @@ export default function Properties() {
       copied = false;
     }
     document.body.removeChild(textArea);
+    previouslyFocused?.focus?.();
     return copied;
   };
 
   const lookupParcel = async (property) => {
     const parcel = firstParcelToken(property.parcel);
-    const gisUrl = parcelGisUrl(property.county, property.state, gisSources);
-    // Copy first while this document still has focus, then open the GIS tab.
-    let copied = false;
-    if (parcel && navigator.clipboard?.writeText) {
+    const countyGisUrl = parcelGisUrl(property.county, property.state, gisSources);
+    if (!parcel) {
+      setSnackbar('No parcel number available for this property.');
+      return;
+    }
+
+    const gisNote = countyGisUrl
+      ? ' — paste it into the county GIS search box.'
+      : `. No GIS site is mapped for ${property.county || 'this county'} yet — ${
+        user?.role === 'admin' ? 'add one under Manage Counties.' : 'ask an admin to add one.'}`;
+
+    // Start the copy while this document still has focus. Without the clipboard
+    // API the fallback must also run before the GIS tab takes focus, since
+    // execCommand('copy') needs a focused document.
+    const copyRequest = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(parcel)
+      : null;
+    let copied = copyRequest !== null ? false : copyParcelForSafari(parcel);
+
+    // Announce before opening the tab: once the GIS tab is in the foreground a
+    // live-region update in this document is no longer announced.
+    setSnackbar(copyRequest !== null || copied
+      ? `Copied parcel ${parcel}${gisNote}`
+      : `Parcel ${parcel} selected — use your browser's Copy command${gisNote}`);
+
+    // window.open must stay in the click gesture; awaiting first spends the
+    // user activation that popup blockers require, so the tab never opens.
+    if (countyGisUrl) {
+      // Open blank first so we can label the tab with the parcel while it's
+      // still same-origin, then sever window.opener ourselves (the manual
+      // equivalent of rel=noopener) before navigating it to the GIS site.
+      // The title reverts to the GIS site's own once that page loads —
+      // browsers don't let us control a cross-origin page's title.
+      const gisTab = window.open('', '_blank');
+      if (gisTab) {
+        gisTab.opener = null;
+        gisTab.document.title = `Parcel ${parcel} — ${property.county || 'County'} GIS`;
+        gisTab.location.href = countyGisUrl;
+      }
+    }
+
+    if (copyRequest !== null) {
       try {
-        await navigator.clipboard.writeText(parcel);
-        copied = true;
+        await copyRequest;
       } catch {
         copied = copyParcelForSafari(parcel);
+        if (!copied) {
+          setSnackbar(`Parcel ${parcel} could not be copied — use your browser's Copy command${gisNote}`);
+        }
       }
-    } else if (parcel) {
-      copied = copyParcelForSafari(parcel);
     }
-    setSnackbar(
-      parcel
-        ? copied
-          ? `Copied parcel ${parcel} — paste it into the county GIS search box.`
-          : `Parcel ${parcel} selected — use Copy from the Safari menu if needed.`
-        : 'No parcel number available for this property.',
-    );
-    if (gisUrl) window.open(gisUrl, '_blank', 'noopener');
   };
 
   if (status === 'loading') return <CircularProgress aria-label="Loading properties" />;
@@ -383,24 +450,66 @@ export default function Properties() {
               <Typography variant="h6" component="h3" gutterBottom>County Sources</Typography>
               {sourceMessage && <Alert severity={sourceMessage.severity} sx={{ mb: 2 }}>{sourceMessage.text}</Alert>}
               <Box component="form" onSubmit={addSources}>
-                <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap alignItems="center">
-                  <TextField size="small" label="County" value={sourceCounty} onChange={(event) => setSourceCounty(event.target.value)} disabled={savingSources} />
-                  <TextField size="small" label="State" value={sourceState} onChange={(event) => setSourceState(event.target.value)} sx={{ width: 90 }} disabled={savingSources} />
-                  <Button type="button" variant="outlined" onClick={generateSriUrl} disabled={savingSources}>Generate SRI URL</Button>
-                  <TextField size="small" label="Label" value={sourceLabel} onChange={(event) => setSourceLabel(event.target.value)} sx={{ minWidth: { xs: '100%', sm: 220 } }} disabled={savingSources} />
-                  <Button type="submit" variant="contained" disabled={savingSources}>
-                    {savingSources ? 'Saving...' : 'Save Sources'}
+                <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap alignItems="flex-start">
+                  <TextField
+                    size="small"
+                    required
+                    label="County"
+                    value={sourceCounty}
+                    onChange={(event) => setSourceCounty(event.target.value)}
+                    disabled={savingSources}
+                    helperText="Used for both the sale list and the GIS lookup"
+                  />
+                  <TextField size="small" required label="State" value={sourceState} onChange={(event) => setSourceState(event.target.value)} sx={{ width: 90 }} disabled={savingSources} />
+                  <TextField
+                    size="small"
+                    label="GIS URL (optional)"
+                    value={gisUrl}
+                    onChange={(event) => setGisUrl(event.target.value)}
+                    placeholder={gisUrlPlaceholder}
+                    sx={{ minWidth: { xs: '100%', sm: 280 } }}
+                    disabled={savingSources}
+                    helperText={
+                      gisCountySlug && gisStateSlug ? (
+                        <>
+                          Try:{' '}
+                          <Link
+                            component="button"
+                            type="button"
+                            onClick={() => setGisUrl(gisUrlPlaceholder)}
+                            disabled={savingSources}
+                            aria-label={`Use ${gisUrlPlaceholder} as the GIS URL`}
+                            sx={{ font: 'inherit', verticalAlign: 'baseline' }}
+                          >
+                            {gisUrlPlaceholder}
+                          </Link>
+                        </>
+                      ) : 'Enables Lookup Parcel for this county'
+                    }
+                  />
+                  <Button type="submit" variant="contained" disabled={savingSources} sx={{ mt: 0.25 }}>
+                    {savingSources ? 'Saving…' : 'Save County'}
                   </Button>
                 </Stack>
-                <TextField fullWidth size="small" label="Complete SRI URL (paste or generate)" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} sx={{ mt: 1 }} disabled={savingSources} />
-                <Typography variant="h6" component="h3" gutterBottom sx={{ mt: 3 }}>
-                  GIS Lookup Source
-                </Typography>
-                <Stack direction="row" flexWrap="wrap" spacing={1} useFlexGap alignItems="center">
-                  <TextField size="small" label="County" value={gisCounty} onChange={(event) => setGisCounty(event.target.value)} disabled={savingSources} />
-                  <TextField size="small" label="State" value={gisState} onChange={(event) => setGisState(event.target.value)} sx={{ width: 90 }} disabled={savingSources} />
-                  <TextField size="small" label="GIS URL" value={gisUrl} onChange={(event) => setGisUrl(event.target.value)} sx={{ minWidth: { xs: '100%', sm: 280 } }} disabled={savingSources} />
-                </Stack>
+                <Button
+                  type="button"
+                  size="small"
+                  onClick={() => setAdvancedOpen((open) => !open)}
+                  aria-expanded={advancedOpen}
+                  aria-controls="county-advanced-fields"
+                  sx={{ mt: 1 }}
+                >
+                  {advancedOpen ? 'Hide advanced' : 'Advanced'}
+                </Button>
+                <Collapse in={advancedOpen}>
+                  <Box id="county-advanced-fields" sx={{ mt: 1 }}>
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      Generated from the county and state above. Edit only if this county&apos;s sale list lives elsewhere.
+                    </Typography>
+                    <TextField fullWidth size="small" label="Label" value={sourceLabel} onChange={(event) => setSourceLabel(event.target.value)} disabled={savingSources} />
+                    <TextField fullWidth size="small" label="Complete SRI URL" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} sx={{ mt: 1 }} disabled={savingSources} />
+                  </Box>
+                </Collapse>
               </Box>
               <Stack spacing={0.5} sx={{ mt: 2 }} role="status" aria-live="polite">
                 {sources.map((source) => (
@@ -533,7 +642,7 @@ export default function Properties() {
             </TableHead>
             <TableBody>
               {visibleProperties.map((property) => {
-                const gisUrl = parcelGisUrl(property.county, property.state, gisSources);
+                const countyGisUrl = parcelGisUrl(property.county, property.state, gisSources);
                 return (
                   <TableRow key={property.id}>
                     {listEditorOpen && activeListId === null && (
@@ -569,20 +678,25 @@ export default function Properties() {
                     <TableCell>
                       <Link href={property.map_url} target="_blank" rel="noopener noreferrer">
                         View on Map
+                        <OpenInNewIcon fontSize="inherit" aria-hidden="true" sx={{ ml: 0.5, verticalAlign: 'middle' }} />
+                        <Box component="span" sx={visuallyHidden}> (opens in a new tab)</Box>
                       </Link>
                     </TableCell>
                     <TableCell>
-                      {property.parcel ? (
+                      {firstParcelToken(property.parcel) ? (
                         <Button
                           size="small"
                           onClick={() => lookupParcel(property)}
-                          title={
-                            gisUrl
-                              ? 'Copies the parcel number, then opens the county GIS site to paste into its search box'
-                              : 'Copies the parcel number (no GIS site mapped for this county yet)'
+                          aria-label={
+                            countyGisUrl
+                              ? `Look up parcel ${firstParcelToken(property.parcel)} for ${property.address}: copies the parcel number and opens the county GIS site in a new tab`
+                              : `Copy parcel ${firstParcelToken(property.parcel)} for ${property.address} (no GIS site mapped for this county yet)`
                           }
                         >
                           Lookup Parcel
+                          {countyGisUrl && (
+                            <OpenInNewIcon fontSize="inherit" aria-hidden="true" sx={{ ml: 0.5 }} />
+                          )}
                         </Button>
                       ) : (
                         '—'
@@ -609,9 +723,14 @@ export default function Properties() {
       )}
       <Snackbar
         open={snackbar !== null}
-        autoHideDuration={4000}
+        autoHideDuration={12000}
         onClose={() => setSnackbar(null)}
         message={snackbar || ''}
+        action={
+          <Button color="inherit" size="small" onClick={() => setSnackbar(null)}>
+            Dismiss
+          </Button>
+        }
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       />
     </>

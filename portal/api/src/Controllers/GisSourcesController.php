@@ -23,9 +23,11 @@ final class GisSourcesController
         $county = trim((string) ($body['county'] ?? ''));
         $state = strtoupper(trim((string) ($body['state'] ?? '')));
         $url = trim((string) ($body['url'] ?? ''));
-        if ($county === '' || $state === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        if ($county === '' || $state === '' || !filter_var($url, FILTER_VALIDATE_URL)
+            || !in_array($scheme, ['http', 'https'], true)) {
             http_response_code(400);
-            echo json_encode(['error' => 'County, state, and a valid GIS URL are required.']);
+            echo json_encode(['error' => 'County, state, and a valid http(s) GIS URL are required.']);
             return;
         }
         echo json_encode(['id' => GisSources::create($county, $state, $url)], JSON_THROW_ON_ERROR);

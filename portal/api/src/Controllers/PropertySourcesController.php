@@ -45,8 +45,10 @@ final class PropertySourcesController
             $county = trim((string) ($source['county'] ?? ''));
             $state = strtoupper(trim((string) ($source['state'] ?? '')));
             $url = trim((string) ($source['url'] ?? ''));
-            if ($county === '' || $state === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
-                $this->error('Each GIS source requires a county, state, and valid URL.');
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            if ($county === '' || $state === '' || !filter_var($url, FILTER_VALIDATE_URL)
+                || !in_array($scheme, ['http', 'https'], true)) {
+                $this->error('Each GIS source requires a county, state, and valid http(s) URL.');
                 return;
             }
             $validatedGis[] = ['county' => $county, 'state' => $state, 'url' => $url];

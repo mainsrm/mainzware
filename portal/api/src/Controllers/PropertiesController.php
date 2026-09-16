@@ -11,9 +11,9 @@ final class PropertiesController
     public function index(): void
     {
         header('Content-Type: application/json');
-        // The first request of the day may block briefly while the scraper refreshes the cache.
-        set_time_limit(150);
-        SaleScraper::refreshStaleSources();
+        // Never scrape inline: serve the cached rows and let a background worker
+        // refresh anything stale, so this request returns immediately.
+        SaleScraper::dispatchIfStale();
         echo json_encode(SaleProperties::all(), JSON_THROW_ON_ERROR);
     }
 }

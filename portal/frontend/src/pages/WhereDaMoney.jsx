@@ -38,6 +38,9 @@ export default function WhereDaMoney() {
       if (response.data.length > 0) {
         const requestedBudget = response.data.find((budget) => String(budget.id) === searchParams.get('budget'));
         setBudgetId(String((requestedBudget || response.data[0]).id));
+      } else {
+        // Nothing further to load, so stop here instead of waiting on a budget.
+        setStatus('ready');
       }
     }).catch(() => setStatus('error'));
   }, []);
@@ -108,6 +111,17 @@ export default function WhereDaMoney() {
 
   if (status === 'loading') return <CircularProgress aria-label="Loading spending analysis" />;
   if (status === 'error') return <Alert severity="error">Could not load spending analysis.</Alert>;
+
+  if (budgets.length === 0) {
+    return (
+      <>
+        <Typography variant="h4" component="h2" gutterBottom>Where Da Money</Typography>
+        <Alert severity="info">
+          No budgets yet. Create one on the Budget page, then come back to see where the money went.
+        </Alert>
+      </>
+    );
+  }
 
   return (
     <>

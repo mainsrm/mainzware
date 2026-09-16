@@ -59,11 +59,12 @@ final class SaleScraper
         }
 
         // Under PHP-FPM, PHP_BINARY is php-fpm and cannot run a CLI script, so
-        // prefer a configured CLI binary; the dev server (cli-server) is fine.
-        $configured = getenv('MAINZWORLD_PHP_BINARY') ?: '';
-        $php = ($configured !== '' && is_executable($configured))
-            ? $configured
-            : ((PHP_SAPI === 'cli' || PHP_SAPI === 'cli-server') ? PHP_BINARY : '/usr/bin/php');
+        // resolve a real CLI binary; the dev server (cli-server) can use PHP_BINARY directly.
+        $php = self::resolvePhpBinary();
+        if ($php === null) {
+            error_log('SaleScraper: no usable PHP CLI binary found to dispatch the background worker (set MAINZWORLD_PHP_BINARY)');
+            return;
+        }
 
         $descriptors = [
             0 => ['file', '/dev/null', 'r'],
@@ -79,6 +80,46 @@ final class SaleScraper
         // Intentionally no proc_close(): that would block until the child exits.
         // Releasing the resource frees our handles without waiting; the child is
         // reparented to init and finishes on its own.
+    }
+
+    /**
+     * PHP_BINARY is the FPM/Apache module binary under those SAPIs, not a CLI
+     * executable, so it can't run bin scripts. Try, in order: an explicit
+     * override, the CLI binary next to whichever SAPI is running (works when
+     * CLI and FPM share one install prefix, e.g. Homebrew), PHP_BINARY itself
+     * when we're already CLI, then the common Linux package path.
+     */
+    private static function resolvePhpBinary(): ?string
+    {
+        $configured = getenv('MAINZWORLD_PHP_BINARY') ?: '';
+        $candidates = [
+            $configured,
+            PHP_BINDIR . '/php',
+            (PHP_SAPI === 'cli' || PHP_SAPI === 'cli-server') ? PHP_BINARY : '',
+            '/usr/bin/php',
+        ];
+        foreach ($candidates as $candidate) {
+            if ($candidate !== '' && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Hand any stale sources to a background worker without blocking the caller.
+     * Safe to call on every request: it is a cheap query plus, at most, one
+     * detached process that the file lock collapses into a single scrape.
+     */
+    public static function dispatchIfStale(): void
+    {
+        $running = Database::connection()->query(
+            "SELECT EXISTS (SELECT 1 FROM scrape_sources WHERE scrape_state = 'running')"
+        )->fetchColumn();
+        if ($running || self::sourcesNeedingScrape() === []) {
+            return;
+        }
+        self::dispatchWorker();
     }
 
     /**
@@ -132,9 +173,14 @@ final class SaleScraper
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }
 
-    /** Fall back to the env-configured default only when no SRI sources exist in the DB. */
+    /** Scrape env-configured sources only when no SRI sources exist in the DB. */
     private static function scrapeEnvFallback(): void
     {
+        $raw = getenv('MAINZWORLD_SALE_SOURCES') ?: '';
+        if ($raw === '') {
+            return;
+        }
+
         $configured = (int) Database::connection()
             ->query("SELECT COUNT(*) FROM scrape_sources WHERE vendor = 'SRI' AND is_active = TRUE")
             ->fetchColumn();
@@ -142,7 +188,6 @@ final class SaleScraper
             return;
         }
 
-        $raw = getenv('MAINZWORLD_SALE_SOURCES') ?: self::DEFAULT_SOURCE;
         foreach (array_values(array_filter(array_map('trim', explode(',', $raw)))) as $url) {
             if (!self::scrapedToday($url)) {
                 self::scrape($url);
@@ -177,9 +222,6 @@ final class SaleScraper
         );
         $stmt->execute(['id' => $id, 'error' => $error]);
     }
-
-    private const DEFAULT_SOURCE =
-        'https://sriservices.com/properties?saleId=1356&state=IN&county=Fayette&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates';
 
     private static function scrapedToday(string $url): bool
     {
