@@ -75,7 +75,7 @@ until the product structure is stable and budgeteer's data model is decided.
 | `Logos` | `brand` | done |
 | `SaleAddressMapper` | `services/property-scraper` | done |
 | `MainzWorld` | `portal` | done |
-| `Python/Debt Snowball Forecaster` | portal feature (React + PHP + PostgreSQL) | planned |
+| `Python/Debt Snowball Forecaster` | portal feature (React + PHP + PostgreSQL) | done |
 | `public.*` DB | `portal.*` / `budget.*` schemas | deferred (Phase 7) |
 
 Phase 4 (the two deploy-touching renames) is complete pending a Security review.

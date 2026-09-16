@@ -419,8 +419,201 @@ paths:
                     type: string
         '401':
           description: Login required
+  /debts:
+    get:
+      summary: List the logged-in user's debts
+      operationId: listDebts
+      responses:
+        '200':
+          description: Array of the user's debts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Debt'
+        '401':
+          description: Login required
+    post:
+      summary: Create a debt owned by the logged-in user
+      operationId: createDebt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebtInput'
+      responses:
+        '200':
+          description: Created debt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Debt'
+        '400':
+          description: Invalid debt fields
+        '401':
+          description: Login required
+  /debts/{id}:
+    post:
+      summary: Update one of the logged-in user's debts
+      operationId: updateDebt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebtInput'
+      responses:
+        '200':
+          description: Updated debt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Debt'
+        '400':
+          description: Invalid debt fields
+        '401':
+          description: Login required
+        '404':
+          description: Debt not found
+    delete:
+      summary: Delete one of the logged-in user's debts
+      operationId: deleteDebt
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Debt deleted
+        '401':
+          description: Login required
+        '404':
+          description: Debt not found
+  /debts/snowball:
+    post:
+      summary: Compute a debt-snowball payoff projection from the user's debts
+      operationId: projectSnowball
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                extra_payment:
+                  type: number
+                  minimum: 0
+                  description: Extra monthly amount rolled into the smallest debt.
+                start_month:
+                  type: string
+                  description: Month the projection begins (YYYY-MM); defaults to the current month.
+      responses:
+        '200':
+          description: Snowball projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnowballProjection'
+        '400':
+          description: Invalid input or no debts to project
+        '401':
+          description: Login required
 components:
   schemas:
+    Debt:
+      type: object
+      required: [id, name, balance, min_payment, apr]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        balance:
+          type: number
+        min_payment:
+          type: number
+        apr:
+          type: number
+          description: Annual percentage rate as a percent (e.g. 30 = 30%/yr).
+        sort_order:
+          type: integer
+    DebtInput:
+      type: object
+      required: [name, balance, min_payment]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        balance:
+          type: number
+          minimum: 0
+        min_payment:
+          type: number
+          minimum: 0
+        apr:
+          type: number
+          minimum: 0
+    SnowballProjection:
+      type: object
+      properties:
+        payable:
+          type: boolean
+          description: False when interest outpaces the minimum payments.
+        extra_payment:
+          type: number
+        total_months:
+          type: integer
+          nullable: true
+        debt_free_month:
+          type: string
+          nullable: true
+        total_interest_paid:
+          type: number
+        payoff_order:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              payoff_month:
+                type: integer
+                nullable: true
+              calendar_month:
+                type: string
+                nullable: true
+        monthly_breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              month:
+                type: integer
+              calendar_month:
+                type: string
+              snowball_amount:
+                type: number
+              payments:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    debt:
+                      type: string
+                    payment:
+                      type: number
+                    remaining_balance:
+                      type: number
     SriSource:
       type: object
       required: [label, url]

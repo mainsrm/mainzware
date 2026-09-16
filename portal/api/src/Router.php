@@ -6,6 +6,7 @@ namespace MainzWorld;
 use MainzWorld\Controllers\AuthController;
 use MainzWorld\Controllers\BudgetController;
 use MainzWorld\Controllers\ContentController;
+use MainzWorld\Controllers\DebtsController;
 use MainzWorld\Controllers\MarketController;
 use MainzWorld\Controllers\ProjectsController;
 use MainzWorld\Controllers\PropertiesController;
@@ -209,6 +210,31 @@ final class Router
 
         if ($method === 'DELETE' && preg_match('#^/api/v1/budget/receipts/(\d+)/items/(\d+)$#', $path, $m)) {
             (new BudgetController())->deleteReceiptItem((int) $m[1], (int) $m[2]);
+            return;
+        }
+
+        if ($method === 'GET' && $path === '/api/v1/debts') {
+            (new DebtsController())->index();
+            return;
+        }
+
+        if ($method === 'POST' && $path === '/api/v1/debts') {
+            (new DebtsController())->create();
+            return;
+        }
+
+        if ($method === 'POST' && $path === '/api/v1/debts/snowball') {
+            (new DebtsController())->snowball();
+            return;
+        }
+
+        if ($method === 'POST' && preg_match('#^/api/v1/debts/(\d+)$#', $path, $m)) {
+            (new DebtsController())->update((int) $m[1]);
+            return;
+        }
+
+        if ($method === 'DELETE' && preg_match('#^/api/v1/debts/(\d+)$#', $path, $m)) {
+            (new DebtsController())->delete((int) $m[1]);
             return;
         }
 
