@@ -36,11 +36,43 @@ php portal/api/bin/migrate_db.php
 
 ## Known gotcha: table ownership
 
-Production's tables are owned by the `postgres` superuser (created manually
-during initial setup), but the app connects as `mainzworld_app`, which does
-**not** own them. Non-idempotent migration files that `ALTER`/modify an
-already-existing table will fail with `must be owner of table ...` if the app
-role tries to re-run them — even though the schema is already correct.
+Production's tables were originally owned by the `postgres` superuser (created
+manually during initial setup), but the app connects as `mainzworld_app`.
+`GRANT` cannot fix this: `ALTER TABLE` requires *ownership*, not privileges, so
+any migration altering an existing table failed with `must be owner of table
+...` even though the grants looked correct.
+
+**Resolved 2026-09-16:** ownership of every table and sequence in prod's
+`public` schema was transferred to `mainzworld_app`, so `migrate_db.php` can
+apply migrations unattended during deploy:
+
+```sql
+DO $$
+DECLARE obj record;
+BEGIN
+  FOR obj IN SELECT tablename AS name FROM pg_tables WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER TABLE public.%I OWNER TO mainzworld_app', obj.name);
+  END LOOP;
+  FOR obj IN SELECT sequencename AS name FROM pg_sequences WHERE schemaname = 'public' LOOP
+    EXECUTE format('ALTER SEQUENCE public.%I OWNER TO mainzworld_app', obj.name);
+  END LOOP;
+END
+$$;
+```
+
+Separately, `021_debts.sql` needed `GRANT REFERENCES ON users TO
+mainzworld_app` (adding a foreign key to a table you don't own requires the
+`REFERENCES` privilege on it).
+
+**Accepted tradeoff:** the app's runtime credential can now `ALTER`/`DROP`
+tables, not just read/write rows — a larger blast radius if it ever leaks. This
+was chosen so deploys are self-sufficient; the counterweight is that
+higher-risk components get their own scoped roles instead of the app
+credential (see `manual/scoped_scraper_role.sql`).
+
+Connect as the superuser on the VPS with `sudo -u postgres psql -d mainzworld`
+(peer auth means `psql -U postgres` as root fails). Note the database is named
+`mainzworld` even though the deploy path is `/var/www/mainzware`.
 
 If a database already has tables from migrations that predate this tracking
 system, bootstrap it by recording those filenames as already-applied (using the

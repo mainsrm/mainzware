@@ -36,29 +36,34 @@ printf '%s\n' 'Deploying on VPS...'
 ssh "$REMOTE" "REMOTE_ROOT='$REMOTE_ROOT' bash -s" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
+# Per-run staging dir: fixed /tmp paths survived a failed deploy, and the next
+# run's mv nested the leftover inside itself and aborted.
+STAGING_DIR="$(mktemp -d /tmp/mainzware-deploy.XXXXXX)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+
 mkdir -p "$REMOTE_ROOT"
 if [ -f "$REMOTE_ROOT/api/.env" ]; then
-  cp "$REMOTE_ROOT/api/.env" /tmp/mainzware-production.env
+  cp "$REMOTE_ROOT/api/.env" "$STAGING_DIR/production.env"
 fi
 if [ -d "$REMOTE_ROOT/api/public/uploads" ]; then
-  mv "$REMOTE_ROOT/api/public/uploads" /tmp/mainzware-uploads
+  mkdir -p "$STAGING_DIR/uploads"
+  cp -a "$REMOTE_ROOT/api/public/uploads/." "$STAGING_DIR/uploads/"
 fi
 
-rm -rf /tmp/mainzware-extract
-mkdir -p /tmp/mainzware-extract
-tar -xzf /tmp/mainzware-release.tar.gz -C /tmp/mainzware-extract --strip-components=1
+mkdir -p "$STAGING_DIR/extract"
+tar -xzf /tmp/mainzware-release.tar.gz -C "$STAGING_DIR/extract" --strip-components=1
 rm -rf "$REMOTE_ROOT/frontend" "$REMOTE_ROOT/api"
-cp -a /tmp/mainzware-extract/frontend "$REMOTE_ROOT/frontend"
-cp -a /tmp/mainzware-extract/api "$REMOTE_ROOT/api"
+cp -a "$STAGING_DIR/extract/frontend" "$REMOTE_ROOT/frontend"
+cp -a "$STAGING_DIR/extract/api" "$REMOTE_ROOT/api"
 rm -rf /var/www/SaleAddressMapper
-cp -a /tmp/mainzware-extract/SaleAddressMapper /var/www/SaleAddressMapper
+cp -a "$STAGING_DIR/extract/SaleAddressMapper" /var/www/SaleAddressMapper
 
-if [ -f /tmp/mainzware-production.env ]; then
-  cp /tmp/mainzware-production.env "$REMOTE_ROOT/api/.env"
+if [ -f "$STAGING_DIR/production.env" ]; then
+  cp "$STAGING_DIR/production.env" "$REMOTE_ROOT/api/.env"
 fi
 mkdir -p "$REMOTE_ROOT/api/public/uploads"
-if [ -d /tmp/mainzware-uploads ]; then
-  cp -a /tmp/mainzware-uploads/. "$REMOTE_ROOT/api/public/uploads/"
+if [ -d "$STAGING_DIR/uploads" ]; then
+  cp -a "$STAGING_DIR/uploads/." "$REMOTE_ROOT/api/public/uploads/"
 fi
 
 if [ -f "$REMOTE_ROOT/api/.env" ]; then
@@ -84,8 +89,8 @@ mkdir -p /var/www/SaleAddressMapper/.browsers
 chown -R www-data:www-data /var/www/SaleAddressMapper/.browsers
 runuser -u www-data -- env PLAYWRIGHT_BROWSERS_PATH=/var/www/SaleAddressMapper/.browsers /var/www/SaleAddressMapper/.venv/bin/python -m playwright install chromium
 
-cp /tmp/mainzware-extract/deploy/mainzware-property-scraper.service /etc/systemd/system/mainzware-property-scraper.service
-cp /tmp/mainzware-extract/deploy/mainzware-property-scraper.timer /etc/systemd/system/mainzware-property-scraper.timer
+cp "$STAGING_DIR/extract/deploy/mainzware-property-scraper.service" /etc/systemd/system/mainzware-property-scraper.service
+cp "$STAGING_DIR/extract/deploy/mainzware-property-scraper.timer" /etc/systemd/system/mainzware-property-scraper.timer
 chown -R www-data:www-data /var/www/SaleAddressMapper
 systemctl daemon-reload
 systemctl enable --now mainzware-property-scraper.timer
@@ -94,6 +99,6 @@ php-fpm8.3 -t
 nginx -t
 systemctl restart php8.3-fpm
 systemctl reload nginx
-rm -rf /tmp/mainzware-extract /tmp/mainzware-production.env /tmp/mainzware-uploads /tmp/mainzware-release.tar.gz
+rm -f /tmp/mainzware-release.tar.gz
 printf '%s\n' 'Deployment complete.'
 REMOTE_SCRIPT
