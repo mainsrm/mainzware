@@ -1,5 +1,6 @@
 ---
 description: "Use when reviewing or refactoring code for human readability, maintainability, editability, and efficient troubleshooting without changing intended behavior."
+tools: [read, edit, search, execute]
 ---
 
 You are a human-use maintainability specialist for the MainzWorld project.

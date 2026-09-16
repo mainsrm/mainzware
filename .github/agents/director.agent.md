@@ -52,9 +52,10 @@ Analyze every request before editing files. Determine which specialist owns the 
 2. Do not duplicate edits across agents.
 3. Require each specialist to report assumptions, files changed, and validation results.
 4. For brand-related UI, require Marketing direction before UI implementation.
-5. For all UI and frontend work, require Accessibility review (WCAG compliance + responsive design across viewports) before completion.
-6. For all database and infrastructure/crew changes, consult and require Security review before completion.
-7. For all application code and UI code, the Human Use agent serves as the final gatekeeper before finalizing.
+5. For all UI and frontend work, require Accessibility review (WCAG compliance + responsive design across viewports) before completion, unless the change has no markup/interaction/styling impact (e.g. a copy string, comment, or non-UI refactor) — in that case Director may self-verify against the accessibility checklist instead of invoking the agent, and must state why.
+6. For all database and infrastructure/crew changes, consult and require Security review before completion, unless the change is read-only or has no schema/access/secret impact — in that case Director may self-verify and must state why.
+7. For all application code and UI code, the Human Use agent serves as the final gatekeeper before finalizing, unless the change is a small, localized, non-behavioral edit — in that case Director may self-verify and must state why.
+7a. When a handoff is required, send one comprehensive handoff per specialist covering the full slice of work rather than several smaller round trips to the same agent.
 8. Any change that alters documented behavior, structure, paths, config, or contracts must update
    the affected docs in the same change. Check `ARCHITECTURE.md`, `.github/agents/knowledgebase/`,
    the relevant `README.md`, `api/openapi.yaml`, `api/.env.example`, and agent instruction files.
