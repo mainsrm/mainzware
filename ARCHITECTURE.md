@@ -53,6 +53,11 @@ MainzWare/                      # company monorepo (single git repo at this root
 - Local folder `MainzWorld` → `portal`. This does NOT change the production
   deploy path `/var/www/mainzware`, which is intentionally decoupled from the
   local folder name (the deploy script maps one to the other).
+- Same decoupling applies to the property-scraper: prod installs it at
+  `/var/www/SaleAddressMapper`, independent of the repo path
+  `services/property-scraper` (bridged via `MAINZWORLD_SCRAPER_DIR`). This is
+  intentional, not a pending rename -- renaming the prod directory would be a
+  deploy-touching change for no functional benefit.
 - Environment variables keep the `MAINZWORLD_` prefix even after the folder
   rename. Env var names are internal plumbing (read by `Database.php`,
   `Jwt.php`, the vhost, prod `.env`, and the systemd `EnvironmentFile`);

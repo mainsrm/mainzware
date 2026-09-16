@@ -60,6 +60,23 @@ Spawned children get an explicit allow-listed environment (DB config +
 FastCGI params that a child process does not reliably inherit. The JWT secret
 is deliberately **not** passed to children.
 
+The Python scraper subprocess (not the PHP worker) can optionally run under a
+scoped, least-privilege DB role instead of the full app credential --
+`MAINZWORLD_SCRAPER_DB_USER`/`MAINZWORLD_SCRAPER_DB_PASSWORD`, see
+[`db_migrations/manual/scoped_scraper_role.sql`](../../portal/api/db_migrations/manual/scoped_scraper_role.sql).
+Unset, it falls back to the main app credential as before.
+
+## Watchdog for a killed (not just timed-out) worker
+
+The 120s per-URL timeout only guards a scraper subprocess that's still being
+watched by its PHP parent. If the PHP worker itself is killed mid-run (OOM,
+server restart), its source is left `running` forever: the file lock releases
+when the process dies, so a new worker can start, but `running` rows are
+excluded from the "needs scrape" query and nothing else ever resets them.
+`refreshStaleSources()` reclaims any source that has been `running` for more
+than 2x the per-URL timeout, flipping it to `error` (`scrape_started_at`,
+added in migration 025, tracks when it entered `running`).
+
 ## Net effect
 
 "Runs hourly" (the timer) and "scrapes once a day" (the actual per-county

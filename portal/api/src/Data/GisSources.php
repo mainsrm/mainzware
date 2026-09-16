@@ -18,10 +18,11 @@ final class GisSources
     {
         $stmt = Database::connection()->prepare(
             'INSERT INTO gis_sources (county, state, url) VALUES (:county, :state, :url)
-             ON CONFLICT (county, state) DO UPDATE SET url = EXCLUDED.url
+             ON CONFLICT (lower(county), lower(state)) DO UPDATE SET
+                county = EXCLUDED.county, state = EXCLUDED.state, url = EXCLUDED.url
              RETURNING id'
         );
-        $stmt->execute(['county' => $county, 'state' => $state, 'url' => $url]);
+        $stmt->execute(['county' => trim($county), 'state' => strtoupper(trim($state)), 'url' => $url]);
         return (int) $stmt->fetchColumn();
     }
 

@@ -137,6 +137,7 @@ final class SaleScraper
         }
 
         try {
+            self::reclaimStaleRunning();
             foreach (self::sourcesNeedingScrape() as $source) {
                 self::runSource((int) $source['id'], (string) $source['url']);
             }
@@ -145,6 +146,24 @@ final class SaleScraper
             flock($lockHandle, LOCK_UN);
             fclose($lockHandle);
         }
+    }
+
+    /**
+     * A worker killed mid-run (OOM, server restart, etc.) leaves its source
+     * stuck in 'running' forever: the file lock releases when the process
+     * dies, so a later worker can start, but 'running' rows are excluded from
+     * sourcesNeedingScrape() and nothing else ever resets them. Reclaim any
+     * that have been 'running' well past the per-URL scrape timeout.
+     */
+    private static function reclaimStaleRunning(): void
+    {
+        $stmt = Database::connection()->prepare(
+            "UPDATE scrape_sources
+             SET scrape_state = 'error', last_scrape_error = 'worker_killed_mid_run'
+             WHERE scrape_state = 'running'
+               AND scrape_started_at < now() - make_interval(secs => :seconds)"
+        );
+        $stmt->execute(['seconds' => self::TIMEOUT_SECONDS * 2]);
     }
 
     private static function runSource(int $id, string $url): void
@@ -198,7 +217,10 @@ final class SaleScraper
     private static function setState(int $id, string $state): void
     {
         $stmt = Database::connection()->prepare(
-            'UPDATE scrape_sources SET scrape_state = :state WHERE id = :id'
+            "UPDATE scrape_sources
+             SET scrape_state = :state,
+                 scrape_started_at = CASE WHEN :state = 'running' THEN now() ELSE scrape_started_at END
+             WHERE id = :id"
         );
         $stmt->execute(['state' => $state, 'id' => $id]);
     }
@@ -267,6 +289,26 @@ final class SaleScraper
         return $env;
     }
 
+    /**
+     * Same as childEnvironment(), except the DB credential is swapped for a
+     * scoped one when configured (see db_migrations/manual/scoped_scraper_role.sql).
+     * Only the Python scraper subprocess touches sale_properties directly, so
+     * only it gets the scoped-down credential; the PHP worker (which also
+     * updates scrape_sources) keeps the main app credential.
+     *
+     * @return array<string, string>
+     */
+    private static function scraperProcessEnvironment(): array
+    {
+        $env = self::childEnvironment();
+        $scopedUser = getenv('MAINZWORLD_SCRAPER_DB_USER') ?: '';
+        if ($scopedUser !== '') {
+            $env['MAINZWORLD_DB_USER'] = $scopedUser;
+            $env['MAINZWORLD_DB_PASSWORD'] = getenv('MAINZWORLD_SCRAPER_DB_PASSWORD') ?: '';
+        }
+        return $env;
+    }
+
     /** @return array{url: string, success: bool, status: string, exit_code?: int} */
     private static function scrape(string $url): array
     {
@@ -284,7 +326,7 @@ final class SaleScraper
             [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $scraperDir,
-            self::childEnvironment()
+            self::scraperProcessEnvironment()
         );
         if (!is_resource($process)) {
             error_log("SaleScraper: failed to start scraper for {$url}");

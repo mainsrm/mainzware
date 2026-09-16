@@ -41,14 +41,15 @@ final class PropertySources
             $gisInsert = $pdo->prepare(
                 'INSERT INTO gis_sources (county, state, url)
                  VALUES (:county, :state, :url)
-                 ON CONFLICT (county, state) DO UPDATE SET url = EXCLUDED.url
+                 ON CONFLICT (lower(county), lower(state)) DO UPDATE SET
+                    county = EXCLUDED.county, state = EXCLUDED.state, url = EXCLUDED.url
                  RETURNING id'
             );
             $gisIds = [];
             foreach ($gisSources as $source) {
                 $gisInsert->execute([
-                    'county' => $source['county'],
-                    'state' => $source['state'],
+                    'county' => trim($source['county']),
+                    'state' => strtoupper(trim($source['state'])),
                     'url' => $source['url'],
                 ]);
                 $gisIds[] = (int) $gisInsert->fetchColumn();

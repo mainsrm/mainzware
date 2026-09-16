@@ -39,6 +39,8 @@ final class PropertyLists
                     COALESCE(CASE WHEN p.is_active THEN p.parcel END, pli.parcel) AS parcel,
                     COALESCE(CASE WHEN p.is_active THEN p.map_url END, pli.map_url) AS map_url,
                     COALESCE(CASE WHEN p.is_active THEN p.source_url END, pli.source_url) AS source_url,
+                    COALESCE(CASE WHEN p.is_active THEN p.sri_id END, pli.sri_id) AS sri_id,
+                    COALESCE(CASE WHEN p.is_active THEN p.sri_property_id END, pli.sri_property_id) AS sri_property_id,
                     (p.id IS NULL OR p.is_active = FALSE) AS archived
              FROM property_list_items pli
              JOIN property_lists pl ON pl.id = pli.list_id
@@ -63,8 +65,8 @@ final class PropertyLists
 
             $item = $pdo->prepare(
                 'INSERT INTO property_list_items
-                    (list_id, property_id, address, county, state, sale_status, sale_group, parcel, map_url, source_url)
-                 SELECT :list_id, id, address, county, state, sale_status, sale_group, parcel, map_url, source_url
+                    (list_id, property_id, address, county, state, sale_status, sale_group, parcel, map_url, source_url, sri_id, sri_property_id)
+                 SELECT :list_id, id, address, county, state, sale_status, sale_group, parcel, map_url, source_url, sri_id, sri_property_id
                  FROM sale_properties WHERE id = :property_id
                  ON CONFLICT DO NOTHING'
             );

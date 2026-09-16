@@ -52,6 +52,21 @@ INSERT INTO schema_migrations (filename) VALUES ('002_create_sale_properties.sql
 ON CONFLICT (filename) DO NOTHING;
 ```
 
+## Known exception: `db_migrations/manual/`
+
+Not every schema change can run as the app role (`mainzworld_app`) — `CREATE
+ROLE` and cross-role `GRANT`s need superuser, which that role deliberately
+doesn't have. Those live in `db_migrations/manual/` instead, e.g.
+[`scoped_scraper_role.sql`](../../portal/api/db_migrations/manual/scoped_scraper_role.sql).
+`migrate_db.php` globs `db_migrations/*.sql` non-recursively, so this
+subfolder is never auto-applied -- it's strictly a manual, run-by-hand-as-
+superuser script. Keep these idempotent (safe to re-run), and have each script
+`INSERT` its own filename into `schema_migrations` (e.g.
+`'manual/scoped_scraper_role.sql'`, `ON CONFLICT (filename) DO NOTHING`) as
+its last statement, so `SELECT * FROM schema_migrations` is still the one
+place to check whether a given database has it -- same table, same check,
+just applied by hand instead of by `migrate_db.php`.
+
 ## Known gotcha: JWT secret required for login
 
 Unrelated to migrations directly, but discovered in the same incident: the API
