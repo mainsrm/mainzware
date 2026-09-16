@@ -67,6 +67,15 @@ function parcelGisUrl(county, state, gisSources) {
   return gisSources[gisSourceKey(county, state)] || null;
 }
 
+// SRI's property-details modal requires both `id` and `propertyId` together
+// (captured from SRI's own API during scraping); source_url is already a
+// validated sriservices.com URL carrying the rest of the required params.
+function sriDetailUrl(property) {
+  if (!property.source_url || !property.sri_id || !property.sri_property_id) return null;
+  const separator = property.source_url.includes('?') ? '&' : '?';
+  return `${property.source_url}${separator}modal=propertydetails&id=${encodeURIComponent(property.sri_id)}&propertyId=${encodeURIComponent(property.sri_property_id)}`;
+}
+
 export default function Properties() {
   const { user } = useAuth();
   const [properties, setProperties] = useState([]);
@@ -674,7 +683,15 @@ export default function Properties() {
                         )}
                       </TableCell>
                     )}
-                    <TableCell>{property.parcel || '—'}</TableCell>
+                    <TableCell>
+                      {sriDetailUrl(property) ? (
+                        <Link href={sriDetailUrl(property)} target="_blank" rel="noopener noreferrer">
+                          {property.parcel || '—'}
+                          <OpenInNewIcon fontSize="inherit" aria-hidden="true" sx={{ ml: 0.5, verticalAlign: 'middle' }} />
+                          <Box component="span" sx={visuallyHidden}> (opens SRI property details in a new tab)</Box>
+                        </Link>
+                      ) : (property.parcel || '—')}
+                    </TableCell>
                     <TableCell>
                       <Link href={property.map_url} target="_blank" rel="noopener noreferrer">
                         View on Map

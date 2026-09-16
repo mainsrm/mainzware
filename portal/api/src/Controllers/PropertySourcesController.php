@@ -32,8 +32,11 @@ final class PropertySourcesController
             $label = trim((string) ($source['label'] ?? ''));
             $url = trim((string) ($source['url'] ?? ''));
             $vendor = strtoupper(trim((string) ($source['vendor'] ?? 'SRI')));
+            $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+            $host = parse_url($url, PHP_URL_HOST) ?: '';
             if ($vendor !== 'SRI' || $label === '' || !filter_var($url, FILTER_VALIDATE_URL)
-                || !str_contains(parse_url($url, PHP_URL_HOST) ?: '', 'sriservices.com')) {
+                || !in_array($scheme, ['http', 'https'], true)
+                || ($host !== 'sriservices.com' && !str_ends_with($host, '.sriservices.com'))) {
                 $this->error('Each SRI source requires a label and a valid sriservices.com URL.');
                 return;
             }

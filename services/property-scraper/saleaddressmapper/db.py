@@ -40,7 +40,10 @@ def save_properties(properties: Iterable[Property], source_url: str) -> int:
     rows = []
     for p in properties:
         county, state = _split_sale_group(p.sale_group)
-        rows.append((source_url, county, state, p.address, p.status, p.sale_group, p.maps_url, p.parcel))
+        rows.append((
+            source_url, county, state, p.address, p.status, p.sale_group, p.maps_url, p.parcel,
+            p.sri_id, p.sri_property_id,
+        ))
 
     conn = psycopg2.connect(**_connection_params())
     try:
@@ -51,7 +54,7 @@ def save_properties(properties: Iterable[Property], source_url: str) -> int:
             )
             find_existing = cur.connection.cursor()
             try:
-                for source, county, state, address, status, sale_group, map_url, parcel in rows:
+                for source, county, state, address, status, sale_group, map_url, parcel, sri_id, sri_property_id in rows:
                     find_existing.execute(
                         """
                         SELECT id FROM sale_properties
@@ -67,21 +70,21 @@ def save_properties(properties: Iterable[Property], source_url: str) -> int:
                             """
                             UPDATE sale_properties
                             SET county = %s, state = %s, sale_status = %s, sale_group = %s,
-                                map_url = %s, parcel = %s, scraped_at = now(),
-                                last_seen_at = now(), is_active = TRUE
+                                map_url = %s, parcel = %s, sri_id = %s, sri_property_id = %s,
+                                scraped_at = now(), last_seen_at = now(), is_active = TRUE
                             WHERE id = %s
                             """,
-                            (county, state, status, sale_group, map_url, parcel, existing_id[0]),
+                            (county, state, status, sale_group, map_url, parcel, sri_id, sri_property_id, existing_id[0]),
                         )
                     else:
                         cur.execute(
                             """
                             INSERT INTO sale_properties
                                 (source_url, county, state, address, sale_status, sale_group, map_url, parcel,
-                                 scraped_at, last_seen_at, is_active)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), now(), TRUE)
+                                 sri_id, sri_property_id, scraped_at, last_seen_at, is_active)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now(), TRUE)
                             """,
-                            (source, county, state, address, status, sale_group, map_url, parcel),
+                            (source, county, state, address, status, sale_group, map_url, parcel, sri_id, sri_property_id),
                         )
             finally:
                 find_existing.close()

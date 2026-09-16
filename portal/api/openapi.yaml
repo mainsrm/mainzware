@@ -670,6 +670,15 @@ components:
         parcel:
           type: string
           nullable: true
+        source_url:
+          type: string
+          nullable: true
+        sri_id:
+          type: string
+          nullable: true
+        sri_property_id:
+          type: string
+          nullable: true
         scraped_at:
           type: string
           format: date-time

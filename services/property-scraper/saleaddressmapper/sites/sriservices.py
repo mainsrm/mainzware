@@ -78,10 +78,32 @@ class SriServicesAdapter(SiteAdapter):
     def fetch(self, url: str, *, headless: bool = True, max_pages: int = 200) -> List[Property]:
         properties: List[Property] = []
         seen_sale_ids: set[str] = set()
+        # displaySaleId -> (internal id, "main / alt" propertyId) from SRI's own
+        # card-detail API, captured passively (no extra requests) so the parcel
+        # can link straight to that property's details modal.
+        detail_by_sale_id: dict[str, tuple[str, str]] = {}
+
+        def _capture_detail_ids(response) -> None:
+            try:
+                body = response.json()
+            except Exception:
+                return
+            records = body.get("properties") if isinstance(body, dict) else None
+            if not isinstance(records, list):
+                return
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                sale_id = str(record.get("displaySaleId") or "").strip()
+                internal_id = record.get("id")
+                property_id = record.get("propertyId")
+                if sale_id and internal_id is not None and property_id:
+                    detail_by_sale_id[sale_id] = (str(internal_id), str(property_id))
 
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=headless)
             page = browser.new_page()
+            page.on("response", _capture_detail_ids)
             page.goto(url, wait_until="networkidle")
             page.wait_for_selector("text=/Showing \\d+ propert/i", timeout=30000)
 
@@ -117,6 +139,11 @@ class SriServicesAdapter(SiteAdapter):
                     page.wait_for_timeout(600)
 
             browser.close()
+
+        for prop in properties:
+            match = detail_by_sale_id.get(prop.sale_id)
+            if match:
+                prop.sri_id, prop.sri_property_id = match
 
         return properties
 

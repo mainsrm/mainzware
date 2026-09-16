@@ -31,7 +31,9 @@ final class ScrapeSourcesController
             echo json_encode(['error' => 'SRI vendor, label, and a valid URL are required.']);
             return;
         }
-        if (!str_contains(parse_url($url, PHP_URL_HOST) ?: '', 'sriservices.com')) {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $host = parse_url($url, PHP_URL_HOST) ?: '';
+        if (!in_array($scheme, ['http', 'https'], true) || ($host !== 'sriservices.com' && !str_ends_with($host, '.sriservices.com'))) {
             http_response_code(400);
             echo json_encode(['error' => 'The URL must belong to sriservices.com.']);
             return;
