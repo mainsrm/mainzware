@@ -227,19 +227,24 @@ export default function Snowball() {
 
       <Grid container spacing={3}>
         <Grid item xs={12} md={7}>
-          <Paper variant="outlined" sx={{ p: 2 }}>
-            <Typography variant="h6" component="h2" gutterBottom>
+          <Paper variant="outlined" sx={{ p: { xs: 1, sm: 2 } }}>
+            <Typography id="snowball-debts-heading" variant="h6" component="h2" gutterBottom>
               Your debts
             </Typography>
-            <TableContainer>
+            <TableContainer
+              role="region"
+              aria-labelledby="snowball-debts-heading"
+              tabIndex={0}
+              sx={{ overflowX: 'auto' }}
+            >
               <Table size="small" aria-label="Your debts">
                 <TableHead>
                   <TableRow>
-                    <TableCell scope="col">Name</TableCell>
-                    <TableCell scope="col" align="right">Balance</TableCell>
-                    <TableCell scope="col" align="right">Min. payment</TableCell>
-                    <TableCell scope="col" align="right">APR %</TableCell>
-                    <TableCell scope="col" align="right">Actions</TableCell>
+                    <TableCell scope="col" sx={{ px: { xs: 0.5, sm: 2 }, minWidth: { xs: 120, sm: 160 } }}>Name</TableCell>
+                    <TableCell scope="col" align="right" sx={{ px: { xs: 0.5, sm: 2 }, minWidth: { xs: 72, sm: 96 } }}>Balance</TableCell>
+                    <TableCell scope="col" align="right" sx={{ px: { xs: 0.5, sm: 2 }, minWidth: { xs: 64, sm: 96 } }}>Min. payment</TableCell>
+                    <TableCell scope="col" align="right" sx={{ px: { xs: 0.5, sm: 2 }, minWidth: { xs: 56, sm: 72 } }}>APR %</TableCell>
+                    <TableCell scope="col" align="right" sx={{ px: { xs: 0.5, sm: 2 }, minWidth: { xs: 72, sm: 96 } }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -252,46 +257,54 @@ export default function Snowball() {
                   )}
                   {debts.map((debt, index) => (
                     <TableRow key={debt.id}>
-                      <TableCell>
+                      <TableCell sx={{ px: { xs: 0.5, sm: 2 } }}>
                         <TextField
                           value={debt.name}
                           onChange={(event) => updateDebtField(debt.id, 'name', event.target.value)}
                           variant="standard"
                           size="small"
+                          fullWidth
+                          sx={{ minWidth: { xs: 100, sm: 140 }, '& input': { fontSize: 16 } }}
                           inputProps={{ 'aria-label': `Name for debt ${debt.name || index + 1}` }}
                         />
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ px: { xs: 0.5, sm: 2 } }}>
                         <TextField
                           value={debt.balance}
                           onChange={(event) => updateDebtField(debt.id, 'balance', event.target.value)}
                           type="number"
                           variant="standard"
                           size="small"
+                          fullWidth
+                          sx={{ minWidth: { xs: 60, sm: 80 }, '& input': { fontSize: 16 } }}
                           inputProps={{ min: 0, step: '0.01', 'aria-label': `Balance for ${debt.name || `debt ${index + 1}`}` }}
                         />
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ px: { xs: 0.5, sm: 2 } }}>
                         <TextField
                           value={debt.min_payment}
                           onChange={(event) => updateDebtField(debt.id, 'min_payment', event.target.value)}
                           type="number"
                           variant="standard"
                           size="small"
+                          fullWidth
+                          sx={{ minWidth: { xs: 56, sm: 80 }, '& input': { fontSize: 16 } }}
                           inputProps={{ min: 0, step: '0.01', 'aria-label': `Minimum payment for ${debt.name || `debt ${index + 1}`}` }}
                         />
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ px: { xs: 0.5, sm: 2 } }}>
                         <TextField
                           value={debt.apr}
                           onChange={(event) => updateDebtField(debt.id, 'apr', event.target.value)}
                           type="number"
                           variant="standard"
                           size="small"
+                          fullWidth
+                          sx={{ minWidth: { xs: 48, sm: 60 }, '& input': { fontSize: 16 } }}
                           inputProps={{ min: 0, step: '0.1', 'aria-label': `APR percent for ${debt.name || `debt ${index + 1}`}` }}
                         />
                       </TableCell>
-                      <TableCell align="right">
+                      <TableCell align="right" sx={{ px: { xs: 0.5, sm: 2 } }}>
                         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                           <IconButton
                             aria-label={`Save ${debt.name || `debt ${index + 1}`}`}

@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/AppShell';
 import ErrorBoundary from './components/ErrorBoundary';
 import Home from './pages/Home';
@@ -20,7 +20,9 @@ export default function App() {
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/mainz-world" element={<RequireAuth><Dashboard /></RequireAuth>} />
+            <Route path="/portal" element={<RequireAuth><Dashboard /></RequireAuth>} />
+            {/* Old dashboard URL kept as a redirect so existing bookmarks/links keep working. */}
+            <Route path="/mainz-world" element={<Navigate to="/portal" replace />} />
             <Route path="/properties" element={<RequireAuth><Properties /></RequireAuth>} />
             <Route path="/what-da-money" element={<RequireAuth><Budget /></RequireAuth>} />
             <Route path="/where-da-money" element={<RequireAuth><WhereDaMoney /></RequireAuth>} />

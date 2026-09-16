@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "start:stack": "bash ../start-mainzworld.sh",
+    "check:stack": "bash ../check-mainzworld.sh",
+    "clean:stack": "bash ../check-mainzworld.sh --clean",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint ."

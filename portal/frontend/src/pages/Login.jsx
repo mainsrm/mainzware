@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 export default function Login() {
   const { user, status } = useAuth();
   const location = useLocation();
-  const from = location.state?.from || '/mainz-world';
+  const from = location.state?.from || '/portal';
 
   if (status === 'loading') return null;
   if (user) return <Navigate to={from} replace />;

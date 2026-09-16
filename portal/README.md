@@ -46,7 +46,10 @@ portal/
 2. API: point an Apache vhost's `DocumentRoot` at `portal/api/public` (e.g. `http://localhost:8080`),
    and run `composer install` inside `api/` once dependencies are added.
 3. Set environment variables for the database connection: `MAINZWORLD_DB_HOST`,
-   `MAINZWORLD_DB_NAME`, `MAINZWORLD_DB_USER`, `MAINZWORLD_DB_PASSWORD`.
+   `MAINZWORLD_DB_NAME`, `MAINZWORLD_DB_USER`, `MAINZWORLD_DB_PASSWORD`. See
+   `api/.env.example` for the full, current list (including the optional
+   `MAINZWORLD_MIGRATOR_DB_USER`/`PASSWORD` used only by `bin/migrate_db.php` --
+   `.env.example` is the source of truth; this list is illustrative, not exhaustive.
 4. In dev, the Vite server proxies `/api/*` requests to the PHP backend (see `frontend/vite.config.js`).
 
 ## Production Deployment
@@ -94,6 +97,21 @@ After migrations are applied, grant the application role access to the tables an
 ```bash
 sudo -u postgres psql -d mainzworld -c "GRANT USAGE ON SCHEMA public TO mainzworld_app; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO mainzworld_app; GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO mainzworld_app; ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO mainzworld_app; ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO mainzworld_app;"
 ```
+
+**This is the original bootstrap recipe only, for standing up a brand-new server.**
+Production has since applied two further migrations that this recipe predates
+and does not include -- a fresh setup is not at parity with production until
+both also run:
+
+- The schema split (`portal`/`budget`/`auth` instead of flat `public`) --
+  `db_migrations/027_schema_split.sql` plus its `manual/027_schema_split_prepare.sql`.
+- The credential split -- `db_migrations/manual/runtime_role.sql`, which
+  creates `mainzworld_runtime` (DML-only) as the credential the running web
+  app actually uses; `mainzworld_app` above becomes the migrator-only role
+  after that point.
+
+See `.github/agents/knowledgebase/db-migrations.md` for both runbooks in full,
+including the arm-gate required before running the schema split.
 
 ### DNS
 
@@ -163,6 +181,18 @@ as empty `env[...]` entries because PHP-FPM rejects empty values. Restart after 
 systemctl restart php8.3-fpm
 ```
 
+**`.env` and the pool's `env[...]` directives are two separate files that do
+not sync automatically.** `.env` is read only by CLI scripts that explicitly
+source it (`migrate_db.php`, `check_env.php`, the scraper's systemd unit). The
+web-facing PHP-FPM pool reads its own hardcoded `env[MAINZWORLD_DB_*]` lines in
+`/etc/php/8.3/fpm/pool.d/www.conf`, set here at initial setup and otherwise
+untouched by `.env` edits or by `deploy-mainzware.sh`. Rotating any DB
+credential later means updating **both** files and restarting php-fpm --
+missing the pool file causes every DB-backed request to fail authentication
+while `.env`-only checks (`check_env.php`, a manual `migrate_db.php` run)
+continue to report success. See `.github/agents/knowledgebase/db-migrations.md`
+for the incident this caused once already.
+
 ### Nginx and HTTPS
 
 The Nginx site serves `/var/www/mainzware/frontend` and forwards `/api/` to
@@ -189,8 +219,15 @@ certbot renew --dry-run
 ### Database Migrations
 
 Apply migrations with `php api/bin/migrate_db.php` (safe to re-run — it skips
-files already recorded in `schema_migrations`). To apply by hand instead, run
-them once, in filename order, from the API directory:
+files already recorded in `schema_migrations`). **Always use this script, not
+a manual loop.** The for-loop fallback below applies each file with a bare
+`psql -f` and no transaction wrapping -- fine for early, simple migrations, but
+unsafe for anything added since: `027_schema_split.sql` requires an explicit
+arm-gate and a transaction (`--single-transaction` or `migrate_db.php`'s own
+wrapping) to work at all, and running it via this loop will either fail
+confusingly or, if ever un-gated, take an unbounded lock with no timeout. Only
+use the loop for a from-scratch bootstrap where every file up to a known-safe
+point has already been reviewed:
 
 ```bash
 cd /var/www/mainzware/api
@@ -203,8 +240,9 @@ must not attempt to rename a nonexistent `cms_users` table.
 ### First Application Admin
 
 The application login is separate from the VPS `root` account, Linux `mainz` account, PostgreSQL
-administrator, and `mainzworld_app` database role. Create the first Mains World admin after the
-database permissions and PHP-FPM environment are configured:
+administrator, and the database roles (`mainzworld_app`, the migrator; `mainzworld_runtime`, the
+role the running app actually connects as -- see `db-migrations.md`). Create the first Mains World
+admin after the database permissions and PHP-FPM environment are configured:
 
 ```bash
 cd /var/www/mainzware/api

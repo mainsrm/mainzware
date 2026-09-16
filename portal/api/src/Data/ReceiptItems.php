@@ -68,24 +68,28 @@ final class ReceiptItems
         return (int) $stmt->fetchColumn();
     }
 
-    public static function update(int $itemId, string $description, float $amount, ?string $budgetCategory): void
+    public static function update(int $itemId, int $receiptId, string $description, float $amount, ?string $budgetCategory): void
     {
+        // Scoped to receipt_id so a caller cannot mutate another receipt's item by
+        // guessing/forging an id; belongsToReceipt() in the controller is for the
+        // 404 message, this is the actual enforcement.
         $stmt = Database::connection()->prepare(
             'UPDATE receipt_items SET description = :description, amount = :amount, budget_category = :budget_category
-             WHERE id = :id'
+             WHERE id = :id AND receipt_id = :receipt_id'
         );
         $stmt->execute([
             'description' => $description,
             'amount' => $amount,
             'budget_category' => $budgetCategory,
             'id' => $itemId,
+            'receipt_id' => $receiptId,
         ]);
     }
 
-    public static function delete(int $itemId): void
+    public static function delete(int $itemId, int $receiptId): void
     {
-        $stmt = Database::connection()->prepare('DELETE FROM receipt_items WHERE id = :id');
-        $stmt->execute(['id' => $itemId]);
+        $stmt = Database::connection()->prepare('DELETE FROM receipt_items WHERE id = :id AND receipt_id = :receipt_id');
+        $stmt->execute(['id' => $itemId, 'receipt_id' => $receiptId]);
     }
 
     public static function totalFor(int $receiptId): float

@@ -15,7 +15,7 @@
 .hero-header__picture {
   display: block;
   width: 100%;
-  max-width: 1983px;
+  max-width: 2172px;
   margin: 0 auto;
 }
 
@@ -25,13 +25,7 @@
   height: auto;
   max-width: 100%;
   object-fit: contain;
-  aspect-ratio: 1983 / 469;
-}
-
-@media (max-width: 768px) {
-  .hero-header__img {
-    aspect-ratio: 2171 / 724;
-  }
+  aspect-ratio: 2172 / 724;
 }
 
 /* Fallback / utility definition for screen-reader-only accessible heading */

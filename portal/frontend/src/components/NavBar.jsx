@@ -17,12 +17,14 @@ import ListItemText from '@mui/material/ListItemText';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
+import useTheme from '@mui/material/styles/useTheme';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { navigationFor } from '../navigation';
 
-const TABLET_NAV_QUERY = '(min-width:768px)';
-const TABLET_NAV_MEDIA = '@media (min-width:768px)';
+// Below 'md' (900px) the nav collapses into a drawer instead of horizontally-scrollable Tabs,
+// so landscape phones and small tablets get the drawer rather than a scroll strip.
+const NAV_BREAKPOINT = 'md';
 
 export default function NavBar() {
   const [accountMenuAnchor, setAccountMenuAnchor] = useState(null);
@@ -32,7 +34,8 @@ export default function NavBar() {
   const { user, status, logout } = useAuth();
   const links = navigationFor(user);
   const currentValue = links.some((link) => link.to === pathname) ? pathname : false;
-  const isTabletOrWider = useMediaQuery(TABLET_NAV_QUERY);
+  const theme = useTheme();
+  const isTabletOrWider = useMediaQuery(theme.breakpoints.up(NAV_BREAKPOINT));
 
   useEffect(() => {
     if (isTabletOrWider) {
@@ -47,7 +50,7 @@ export default function NavBar() {
 
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', [TABLET_NAV_MEDIA]: { display: 'none' } }}>
+      <Box sx={{ display: { xs: 'flex', [NAV_BREAKPOINT]: 'none' }, alignItems: 'center' }}>
         <Button
           aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
           aria-controls="main-nav-drawer"
@@ -58,8 +61,7 @@ export default function NavBar() {
           onClick={() => setMobileNavOpen((open) => !open)}
           size="small"
           sx={{
-            display: 'inline-flex',
-            [TABLET_NAV_MEDIA]: { display: 'none' },
+            display: { xs: 'inline-flex', [NAV_BREAKPOINT]: 'none' },
             border: '1px solid',
             borderColor: 'divider',
             borderRadius: 2,
@@ -72,7 +74,7 @@ export default function NavBar() {
         </Button>
       </Box>
 
-      <Box component="nav" sx={{ display: 'none', [TABLET_NAV_MEDIA]: { display: 'flex' }, flex: '1 1 auto', minWidth: 0, alignItems: 'center' }}>
+      <Box component="nav" sx={{ display: { xs: 'none', [NAV_BREAKPOINT]: 'flex' }, flex: '1 1 auto', minWidth: 0, alignItems: 'center' }}>
         <Tabs value={currentValue} variant="scrollable" aria-label="Mainz World navigation">
           {links.map((link) => (
             <Tab key={link.to} label={link.label} value={link.to} component={NavLink} to={link.to} />

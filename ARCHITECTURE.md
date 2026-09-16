@@ -63,22 +63,25 @@ MainzWare/                      # company monorepo (single git repo at this root
   `Jwt.php`, the vhost, prod `.env`, and the systemd `EnvironmentFile`);
   renaming them adds risk for no user-facing benefit.
 
-## Database philosophy (future)
+## Database philosophy — DONE 2026-09-16
 
-Mirror the product boundaries with PostgreSQL schemas instead of one flat
-`public` schema (e.g. `portal.*`, `budget.*`, shared `auth.users`). This is the
-highest-risk change (production data lives in `public` today) and is deferred
-until the product structure is stable and budgeteer's data model is decided.
+Product boundaries are now mirrored with PostgreSQL schemas instead of one flat
+`public` schema (`portal.*`, `budget.*`, shared `auth.users`). This was the
+highest-risk change in the repo (production data lived in `public`) and is
+now live on production, alongside the credential split described below. See
+`.github/agents/knowledgebase/db-migrations.md` for the full mechanism and
+`portal/research/security.md` for the two review passes.
 
-**Prerequisite to fold into that same session:** split the migration credential
-from the runtime credential. Prod's `public` tables/sequences are currently
-owned by `mainzworld_app` (done 2026-09-16 so deploys can migrate unattended),
-which means the credential the web app uses on every request can also
-`ALTER`/`DROP` tables. The fix is a separate owner/migrator role used only by
-`migrate_db.php`, with `mainzworld_app` dropped back to row-level DML. It is
-deliberately **not** done standalone because it re-owns every object — the same
-surgery Phase 7 already performs — and doing it twice doubles the risk on the
-repo's highest-risk area. See `.github/agents/knowledgebase/db-migrations.md`.
+The migration credential is split from the runtime credential. **Done
+2026-09-16.** Prod's `public`/now
+`portal`/`budget`/`auth` tables and sequences were owned by `mainzworld_app`;
+the running web app now connects as a new `mainzworld_runtime` role
+(SELECT/INSERT/UPDATE/DELETE only), while `mainzworld_app` is used solely by
+`bin/migrate_db.php` via `Database::migratorConnection()`. See
+`.github/agents/knowledgebase/db-migrations.md` and `portal/research/security.md`
+for the rollout, the review, and an incident encountered along the way
+(unrelated to the design: a hardcoded credential in the php-fpm pool config
+that isn't wired to `.env`, discovered and documented, not yet fully fixed).
 
 ## Migration status
 
@@ -91,11 +94,14 @@ repo's highest-risk area. See `.github/agents/knowledgebase/db-migrations.md`.
 | `SaleAddressMapper` | `services/property-scraper` | done |
 | `MainzWorld` | `portal` | done |
 | `Python/Debt Snowball Forecaster` | portal feature (React + PHP + PostgreSQL) | done |
-| `public.*` DB | `portal.*` / `budget.*` schemas | deferred (Phase 7) |
+| `public.*` DB | `portal.*` / `budget.*` schemas | done |
 
 Phase 4 (the two deploy-touching renames) is complete pending a Security review.
-Phase 7 (DB schemas) requires a Security review before completion, per the
-gatekeeping rules in `.github/agents/director.agent.md`.
+Phase 7 (DB schemas) is complete, including its required Security review, per
+the gatekeeping rules in `.github/agents/director.agent.md` (second pass,
+2026-09-16 — see `portal/research/security.md`). It ran as an attended
+production window, gated behind an arming row so no deploy could apply it
+unattended; see the runbook in `.github/agents/knowledgebase/db-migrations.md`.
 
 ## See also
 

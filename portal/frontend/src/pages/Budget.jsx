@@ -21,6 +21,7 @@ import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import Chip from '@mui/material/Chip';
+import Paper from '@mui/material/Paper';
 
 export default function Budget() {
   const { user } = useAuth();
@@ -512,6 +513,85 @@ export default function Budget() {
         </Box>
       </Dialog>
 
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+        <Typography variant="subtitle1" component="h3" gutterBottom>
+          Import & manage data
+        </Typography>
+        {user && canWrite ? (
+          budgetId && (
+            <>
+              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} flexWrap="wrap">
+                <Stack spacing={1} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Button variant="contained" component="label" disabled={uploading}>
+                      {uploading ? 'Importing…' : 'Import CSV / Excel'}
+                      <input
+                        type="file"
+                        hidden
+                        accept=".csv,.xlsx,.xls"
+                        onChange={handleFileChange}
+                      />
+                    </Button>
+                    {uploading && <CircularProgress size={24} aria-label="Importing file" />}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 500 }}>
+                    Accepted headers are flexible: Date/Posting Date + Description/Memo + Amount, or Debit/Credit. Optional columns include Merchant/Payee, Account, Category, Reference, and Balance.
+                  </Typography>
+                </Stack>
+                <Stack spacing={1} alignItems="flex-start" sx={{ minWidth: 0 }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Button variant="outlined" component="label" disabled={uploadingReceipt}>
+                      {uploadingReceipt ? 'Uploading…' : 'Upload Receipt'}
+                      <input
+                        type="file"
+                        hidden
+                        accept=".jpg,.jpeg,.png,.heic,.pdf"
+                        onChange={handleReceiptChange}
+                      />
+                    </Button>
+                    {uploadingReceipt && <CircularProgress size={24} aria-label="Uploading receipt" />}
+                  </Stack>
+                  <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400 }}>
+                    Snap or upload a receipt photo. Itemization is processed after upload.
+                  </Typography>
+                </Stack>
+              </Stack>
+              <Box component="form" onSubmit={createCategory} sx={{ mt: 2 }}>
+                <Button
+                  type="button"
+                  size="small"
+                  aria-expanded={categoryEditorOpen}
+                  aria-controls="category-manager-panel"
+                  onClick={() => setCategoryEditorOpen((open) => !open)}
+                >
+                  {categoryEditorOpen ? 'Hide category manager' : 'Manage categories'}
+                </Button>
+                {categoryEditorOpen && (
+                  <Stack id="category-manager-panel" direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mt: 1 }}>
+                    <TextField size="small" label="New category" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} required />
+                    <TextField select size="small" label="Parent category" value={parentCategoryId} onChange={(event) => setParentCategoryId(event.target.value)} sx={{ minWidth: 190 }}>
+                      <MenuItem value="">No parent</MenuItem>
+                      {categories.filter((category) => !category.parent_category_id).map((category) => (
+                        <MenuItem key={category.id} value={String(category.id)}>{category.name}</MenuItem>
+                      ))}
+                    </TextField>
+                    <Button type="submit" variant="outlined">Add category</Button>
+                  </Stack>
+                )}
+              </Box>
+            </>
+          )
+        ) : user ? (
+          <Alert severity="info">This budget is view-only. Ask the owner for editor access to import transactions.</Alert>
+        ) : (
+          <Alert severity="info">
+            <RouterLink to="/login" state={{ from: '/what-da-money' }}>Log in</RouterLink> to import transactions.
+          </Alert>
+        )}
+      </Paper>
+
+      {uploadMessage && <Alert severity={uploadMessage.severity} sx={{ mb: 2 }}>{uploadMessage.text}</Alert>}
+
       <Typography variant="h6" component="h3" gutterBottom>
         What Da Money Does
       </Typography>
@@ -523,6 +603,7 @@ export default function Budget() {
             value={month}
             onChange={(event) => setMonth(event.target.value)}
             InputLabelProps={{ shrink: true }}
+            sx={{ minWidth: 200 }}
           />
           <Typography variant="body2" color="text.secondary">
             Enter category targets, then save each row. Actuals come from imported transactions.
@@ -530,71 +611,6 @@ export default function Budget() {
         </Stack>
       )}
       {budgetId && <BudgetVariance budgetId={budgetId} month={month} canWrite={canWrite} />}
-
-      {canWrite && (
-        <Box component="form" onSubmit={createCategory} sx={{ mb: 3 }}>
-          <Button size="small" onClick={() => setCategoryEditorOpen((open) => !open)}>
-            {categoryEditorOpen ? 'Hide category manager' : 'Manage categories'}
-          </Button>
-          {categoryEditorOpen && (
-            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" sx={{ mt: 1 }}>
-              <TextField size="small" label="New category" value={categoryName} onChange={(event) => setCategoryName(event.target.value)} required />
-              <TextField select size="small" label="Parent category" value={parentCategoryId} onChange={(event) => setParentCategoryId(event.target.value)} sx={{ minWidth: 190 }}>
-                <MenuItem value="">No parent</MenuItem>
-                {categories.filter((category) => !category.parent_category_id).map((category) => (
-                  <MenuItem key={category.id} value={String(category.id)}>{category.name}</MenuItem>
-                ))}
-              </TextField>
-              <Button type="submit" variant="outlined">Add category</Button>
-            </Stack>
-          )}
-        </Box>
-      )}
-
-      <Stack direction="row" flexWrap="wrap" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-        {user && canWrite ? (
-          <>
-            <Stack spacing={1} alignItems="flex-start">
-              <Button variant="contained" component="label" disabled={uploading}>
-                {uploading ? 'Importing…' : 'Import CSV / Excel'}
-                <input
-                  type="file"
-                  hidden
-                  accept=".csv,.xlsx,.xls"
-                  onChange={handleFileChange}
-                />
-              </Button>
-              <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 500 }}>
-                Accepted headers are flexible: Date/Posting Date + Description/Memo + Amount, or Debit/Credit. Optional columns include Merchant/Payee, Account, Category, Reference, and Balance.
-              </Typography>
-            </Stack>
-            {uploading && <CircularProgress size={24} aria-label="Importing file" />}
-            <Stack spacing={1} alignItems="flex-start">
-              <Button variant="outlined" component="label" disabled={uploadingReceipt}>
-                {uploadingReceipt ? 'Uploading…' : 'Upload Receipt'}
-                <input
-                  type="file"
-                  hidden
-                  accept=".jpg,.jpeg,.png,.heic,.pdf"
-                  onChange={handleReceiptChange}
-                />
-              </Button>
-              <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 400 }}>
-                Snap or upload a receipt photo. Itemization is processed after upload.
-              </Typography>
-            </Stack>
-            {uploadingReceipt && <CircularProgress size={24} aria-label="Uploading receipt" />}
-          </>
-        ) : user ? (
-          <Alert severity="info">This budget is view-only. Ask the owner for editor access to import transactions.</Alert>
-        ) : (
-          <Alert severity="info">
-            <RouterLink to="/login" state={{ from: '/what-da-money' }}>Log in</RouterLink> to import transactions.
-          </Alert>
-        )}
-      </Stack>
-
-      {uploadMessage && <Alert severity={uploadMessage.severity} sx={{ mb: 2 }}>{uploadMessage.text}</Alert>}
 
       {user && receipts.length > 0 && (
         <Box sx={{ mb: 3 }}>

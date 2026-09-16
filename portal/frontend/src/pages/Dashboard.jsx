@@ -8,20 +8,20 @@ import { useAuth } from '../context/AuthContext';
 export default function Dashboard() {
   const { user } = useAuth();
   const projects = [
+    ...navigationFor(user)
+      .filter((item) => item.to !== '/portal' && item.to !== '/')
+      .map((item) => ({ name: item.label, description: item.description, url: item.to })),
     {
       name: 'MainzWare',
       description: 'Return to the public MainzWare technology solutions homepage.',
       url: '/',
     },
-    ...navigationFor(user)
-      .filter((item) => item.to !== '/mainz-world' && item.to !== '/')
-      .map((item) => ({ name: item.label, description: item.description, url: item.to })),
   ];
 
   return (
     <>
       <Typography variant="h4" component="h2" gutterBottom>
-        Mains World
+        Portal
       </Typography>
       <Typography sx={{ mb: 3 }}>
         Your private workspace for budgets, property sales, and market analysis.

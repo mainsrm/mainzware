@@ -206,7 +206,8 @@ final class BudgetController
 
         $file = $_FILES['file'] ?? null;
         if ($file === null || $file['error'] !== UPLOAD_ERR_OK) {
-            $this->fail(400, 'No valid file uploaded (field name must be "file").');
+            [$status, $message] = $this->uploadErrorMessage($file['error'] ?? null);
+            $this->fail($status, $message);
             return;
         }
 
@@ -269,7 +270,8 @@ final class BudgetController
 
         $file = $_FILES['file'] ?? null;
         if ($file === null || $file['error'] !== UPLOAD_ERR_OK) {
-            $this->fail(400, 'No valid file uploaded (field name must be "file").');
+            [$status, $message] = $this->uploadErrorMessage($file['error'] ?? null);
+            $this->fail($status, $message);
             return;
         }
 
@@ -441,7 +443,7 @@ final class BudgetController
             return;
         }
 
-        ReceiptItems::update($itemId, $description, $amount, $body['budget_category'] ?? null);
+        ReceiptItems::update($itemId, $receiptId, $description, $amount, $body['budget_category'] ?? null);
         echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
     }
 
@@ -457,7 +459,7 @@ final class BudgetController
             return;
         }
 
-        ReceiptItems::delete($itemId);
+        ReceiptItems::delete($itemId, $receiptId);
         echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
     }
 
@@ -651,5 +653,22 @@ final class BudgetController
     {
         http_response_code($status);
         echo json_encode(['error' => $message], JSON_THROW_ON_ERROR);
+    }
+
+    // Maps a $_FILES[...]['error'] code to an accurate status/message instead of a generic
+    // "field name must be file" response, which is wrong when the field was present but
+    // rejected (e.g. server-side upload_max_filesize is too low).
+    private function uploadErrorMessage(?int $error): array
+    {
+        return match ($error) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
+                [400, 'File is too large for this server\'s current upload limit. Contact an administrator.'],
+            UPLOAD_ERR_PARTIAL =>
+                [400, 'The file upload was interrupted. Please try again.'],
+            UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION =>
+                [500, 'The server could not process this upload. Please try again or contact an administrator.'],
+            default =>
+                [400, 'No valid file uploaded (field name must be "file").'],
+        };
     }
 }

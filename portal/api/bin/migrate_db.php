@@ -6,7 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use MainzWorld\Config\Database;
 
 try {
-    $pdo = Database::connection();
+    $pdo = Database::migratorConnection();
     // Always schema-qualified: once a search_path with other schemas exists, an
     // unqualified CREATE would make a second, empty tracking table and replay
     // every migration from 001 against schemas that already hold live data.
