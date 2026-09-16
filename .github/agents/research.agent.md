@@ -15,8 +15,8 @@ This app is expected to be ready for public release. Prefer current authoritativ
 ## Approach
 1. Identify which domain the request falls under: accessibility, security, database, or ui.
 2. Search for current, authoritative guidance (official docs, OWASP, W3C/WAI, PHP/PostgreSQL docs) — prefer primary sources over blogs.
-3. Read the existing notes file for that domain in `MainzWorld/research/` first, so you extend rather than duplicate.
-4. Write/update `MainzWorld/research/<domain>.md` with a short, actionable bullet list: recommendation, why it matters, and source link. Keep entries terse — this file is read by other agents, not humans reading prose.
+3. Read the existing notes file for that domain in `portal/research/` first, so you extend rather than duplicate.
+4. Write/update `portal/research/<domain>.md` with a short, actionable bullet list: recommendation, why it matters, and source link. Keep entries terse — this file is read by other agents, not humans reading prose.
 5. Flag anything that conflicts with existing project conventions so the user can decide.
 
 ## Output Format

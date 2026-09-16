@@ -20,8 +20,8 @@ test.html
 # JavaScript / Vite
 node_modules/
 dist/
-!MainzWorld/frontend/public/
-!MainzWorld/frontend/public/.htaccess
+!portal/frontend/public/
+!portal/frontend/public/.htaccess
 
 # PHP / Composer
 vendor/
@@ -32,5 +32,5 @@ __pycache__/
 *.py[cod]
 
 # Generated reports and user uploads
-SaleAddressMapper/output/
-MainzWorld/api/public/uploads/
+services/property-scraper/output/
+portal/api/public/uploads/

@@ -1,0 +1,49 @@
+.hero-header {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #050b14;
+  border-bottom: 2px solid #0f1c2e;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.hero-header__picture {
+  display: block;
+  width: 100%;
+  max-width: 1983px;
+  margin: 0 auto;
+}
+
+.hero-header__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  aspect-ratio: 1983 / 469;
+}
+
+@media (max-width: 768px) {
+  .hero-header__img {
+    aspect-ratio: 2171 / 724;
+  }
+}
+
+/* Fallback / utility definition for screen-reader-only accessible heading */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}

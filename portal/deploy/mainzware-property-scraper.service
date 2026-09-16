@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh MainzWare property sources
+After=network-online.target postgresql.service php8.3-fpm.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/mainzware/api
+EnvironmentFile=/var/www/mainzware/api/.env
+Environment=PLAYWRIGHT_BROWSERS_PATH=/var/www/SaleAddressMapper/.browsers
+ExecStart=/usr/bin/php /var/www/mainzware/api/bin/refresh-properties.php
