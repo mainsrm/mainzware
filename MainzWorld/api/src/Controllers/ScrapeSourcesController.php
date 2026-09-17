@@ -36,6 +36,8 @@ final class ScrapeSourcesController
             return;
         }
 
+        $url = self::normalizeSriUrl($url);
+
         try {
             echo json_encode(['id' => ScrapeSources::create($label, $url, $vendor)], JSON_THROW_ON_ERROR);
         } catch (\PDOException $error) {
@@ -60,5 +62,28 @@ final class ScrapeSourcesController
             return;
         }
         echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
+    }
+
+    private static function normalizeSriUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts)) {
+            return $url;
+        }
+
+        parse_str($parts['query'] ?? '', $query);
+        $saleId = trim((string) ($query['saleId'] ?? ''));
+        $state = strtoupper(trim((string) ($query['state'] ?? '')));
+        $county = trim((string) ($query['county'] ?? ''));
+        if ($saleId === '' || $state === '' || $county === '') {
+            return $url;
+        }
+
+        return 'https://sriservices.com/properties?' . http_build_query([
+            'saleId' => $saleId,
+            'state' => $state,
+            'county' => $county,
+            'saleType' => 'tax',
+        ], '', '&', PHP_QUERY_RFC3986);
     }
 }

@@ -50,20 +50,27 @@ final class SaleScraper
         $stmt = Database::connection()->query(
             "SELECT url FROM scrape_sources WHERE vendor = 'SRI' AND is_active = TRUE ORDER BY id"
         );
-        $urls = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        $urls = array_values(array_unique(array_map(
+            [self::class, 'normalizeSriUrl'],
+            $stmt->fetchAll(\PDO::FETCH_COLUMN)
+        )));
         if ($urls !== []) {
             return $urls;
         }
 
         $raw = getenv('MAINZWORLD_SALE_SOURCES') ?: self::DEFAULT_SOURCE;
-        return array_values(array_filter(array_map('trim', explode(',', $raw))));
+        return array_values(array_unique(array_filter(array_map(
+            [self::class, 'normalizeSriUrl'],
+            array_map('trim', explode(',', $raw))
+        ))));
     }
 
     private const DEFAULT_SOURCE =
-        'https://sriservices.com/properties?saleId=1356&state=IN&county=Fayette&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates';
+        'https://sriservices.com/properties?saleId=1356&state=IN&county=Fayette&saleType=tax';
 
     private static function scrapedToday(string $url): bool
     {
+        $url = self::normalizeSriUrl($url);
         $stmt = Database::connection()->prepare(
             'SELECT EXISTS (
                 SELECT 1 FROM sale_properties
@@ -76,6 +83,7 @@ final class SaleScraper
 
     private static function scrape(string $url): void
     {
+        $url = self::normalizeSriUrl($url);
         $scraperDir = getenv('MAINZWORLD_SCRAPER_DIR') ?: dirname(__DIR__, 4) . '/SaleAddressMapper';
         $python = $scraperDir . '/.venv/bin/python';
         if (!is_file($python)) {
@@ -114,5 +122,28 @@ final class SaleScraper
         fclose($pipes[1]);
         fclose($pipes[2]);
         proc_close($process);
+    }
+
+    private static function normalizeSriUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts)) {
+            return $url;
+        }
+
+        parse_str($parts['query'] ?? '', $query);
+        $saleId = trim((string) ($query['saleId'] ?? ''));
+        $state = strtoupper(trim((string) ($query['state'] ?? '')));
+        $county = trim((string) ($query['county'] ?? ''));
+        if ($saleId === '' || $state === '' || $county === '') {
+            return $url;
+        }
+
+        return 'https://sriservices.com/properties?' . http_build_query([
+            'saleId' => $saleId,
+            'state' => $state,
+            'county' => $county,
+            'saleType' => 'tax',
+        ], '', '&', PHP_QUERY_RFC3986);
     }
 }

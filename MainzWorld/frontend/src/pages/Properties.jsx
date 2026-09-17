@@ -41,14 +41,8 @@ function parcelGisUrl(county, state, gisSources) {
   return gisSources[key] || null;
 }
 
-const sriUrlOverrides = {
-  'in|franklin': 'https://sriservices.com/properties?saleId=1356&state=IN&county=Franklin&saleType=tax',
-};
-
 function sriSourceUrl(county, state) {
-  const key = `${state.toLowerCase()}|${county.toLowerCase()}`;
-  return sriUrlOverrides[key]
-    || `https://sriservices.com/properties?saleId=1356&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates`;
+  return `https://sriservices.com/properties?saleId=1356&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}&saleType=tax`;
 }
 
 export default function Properties() {
@@ -114,9 +108,13 @@ export default function Properties() {
   const generateSriUrl = () => {
     const county = sourceCounty.trim();
     const state = sourceState.trim().toUpperCase();
-    if (!county || !state) return;
+    if (!county || !state) {
+      setSourceMessage({ severity: 'warning', text: 'Enter a county and state to generate the canonical SRI URL.' });
+      return;
+    }
     setSourceUrl(sriSourceUrl(county, state));
     if (!sourceLabel) setSourceLabel(`${county} County, ${state}`);
+    setSourceMessage({ severity: 'info', text: `Generated canonical SRI URL for ${county} County, ${state}.` });
   };
 
   const addSource = async (event) => {
@@ -348,7 +346,7 @@ export default function Properties() {
                   <TextField size="small" label="Label" value={sourceLabel} onChange={(event) => setSourceLabel(event.target.value)} required sx={{ minWidth: 220 }} />
                   <Button type="submit" variant="contained" disabled={!sourceUrl}>Add Source</Button>
                 </Stack>
-                <TextField fullWidth size="small" label="Complete SRI URL (paste or generate)" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} required sx={{ mt: 1 }} />
+                <TextField fullWidth size="small" label="Canonical SRI URL (paste or generate)" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} required sx={{ mt: 1 }} />
               </Box>
               <Typography variant="h6" component="h3" gutterBottom sx={{ mt: 3 }}>
                 GIS Lookup Sources
