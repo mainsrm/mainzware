@@ -41,6 +41,16 @@ function parcelGisUrl(county, state, gisSources) {
   return gisSources[key] || null;
 }
 
+const sriUrlOverrides = {
+  'in|franklin': 'https://sriservices.com/properties?saleId=1356&state=IN&county=Franklin&saleType=tax',
+};
+
+function sriSourceUrl(county, state) {
+  const key = `${state.toLowerCase()}|${county.toLowerCase()}`;
+  return sriUrlOverrides[key]
+    || `https://sriservices.com/properties?saleId=1356&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates`;
+}
+
 export default function Properties() {
   const { user } = useAuth();
   const [properties, setProperties] = useState([]);
@@ -105,9 +115,7 @@ export default function Properties() {
     const county = sourceCounty.trim();
     const state = sourceState.trim().toUpperCase();
     if (!county || !state) return;
-    setSourceUrl(
-      `https://sriservices.com/properties?saleId=1356&state=${encodeURIComponent(state)}&county=${encodeURIComponent(county)}&saleType=Tax%20Sale&timeFrame=All%20Future%20Sale%20Dates`,
-    );
+    setSourceUrl(sriSourceUrl(county, state));
     if (!sourceLabel) setSourceLabel(`${county} County, ${state}`);
   };
 
