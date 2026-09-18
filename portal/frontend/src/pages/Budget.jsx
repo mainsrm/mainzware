@@ -280,6 +280,9 @@ export default function Budget() {
       loadReceipts();
     } catch (error) {
       setUploadMessage({ severity: 'error', text: error.response?.data?.error || 'Could not process receipt.' });
+      // The server may have already flipped the receipt to 'failed'; reload so the
+      // list doesn't keep showing a stale 'pending' status after the error above.
+      loadReceipts();
     } finally {
       setReceiptActionBusy(false);
     }

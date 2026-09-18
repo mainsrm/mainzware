@@ -22,6 +22,12 @@ This app is expected to be prepared for public release. A web-hosting push must 
 - PHP 8.1+ with PDO PostgreSQL enabled.
 - PostgreSQL reachable by the PHP process.
 - Nginx configured for both API forwarding and frontend route fallback.
+- Nginx `client_max_body_size` set to at least 12M (default is 1M) and PHP's
+  `upload_max_filesize`/`post_max_size` set to at least 12M/15M — both must clear
+  `BudgetController::MAX_RECEIPT_BYTES` (10MB) or receipt photo uploads fail before
+  reaching the app, with Nginx returning a plain-HTML 413 instead of a JSON error.
+- `tesseract-ocr` installed on the host (`apt install tesseract-ocr` / `brew install
+  tesseract`) — required by `ReceiptOcr` for the receipt "process" step.
 - API environment variables configured with real values from `api/.env.example`.
 - Database migrations applied in order.
 - Frontend built with `npm ci && npm run build`.

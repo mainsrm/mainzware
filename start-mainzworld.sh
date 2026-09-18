@@ -2,7 +2,12 @@
 #
 # MainzWorld local dev launcher (VS Code internal terminal friendly).
 #
-# START:  ./start-mainzworld.sh   (or: npm run start:stack)
+# Run from ANY directory (cwd doesn't matter for any of these forms):
+#   ~/MainzWare/start-mainzworld.sh   # absolute path, works anywhere
+#   npm run start:stack               # from the repo root or portal/frontend
+# Only `./start-mainzworld.sh` requires your cwd to already be the repo root
+# (a bare `./` is a relative path) — prefer one of the forms above instead.
+#
 # STOP:   just close the VS Code terminal / press Ctrl-C — Vite stops.
 #         Apache, PHP-FPM and PostgreSQL are lightweight brew daemons and
 #         are intentionally left running for next time.

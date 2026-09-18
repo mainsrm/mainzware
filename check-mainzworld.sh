@@ -2,8 +2,12 @@
 #
 # MainzWorld stack verifier / cleaner — companion to start-mainzworld.sh
 #
-# VERIFY: ./check-mainzworld.sh            (or: npm run check:stack)
-# CLEAN:  ./check-mainzworld.sh --clean    (or: npm run clean:stack)
+# Run from ANY directory (cwd doesn't matter for any of these forms):
+#   ~/MainzWare/check-mainzworld.sh            # absolute path, works anywhere
+#   npm run check:stack                        # from the repo root or portal/frontend
+#   npm run clean:stack                        # same, with --clean
+# Only `./check-mainzworld.sh` requires your cwd to already be the repo root
+# (a bare `./` is a relative path) — prefer one of the forms above instead.
 #
 # Reports whether Postgres/PHP-FPM/Apache are up and flags duplicate PIDs on
 # their ports (never kills them — they're brew daemons managed separately).

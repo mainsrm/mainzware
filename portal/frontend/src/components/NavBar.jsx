@@ -81,7 +81,7 @@ export default function NavBar() {
           ))}
         </Tabs>
         <Button component={NavLink} to="/" size="small" sx={{ ml: 1, textTransform: 'none' }}>
-          MainzWare
+          Homepage
         </Button>
       </Box>
 
@@ -129,7 +129,7 @@ export default function NavBar() {
               </ListItemButton>
             ))}
             <ListItemButton component={NavLink} to="/" onClick={() => setMobileNavOpen(false)} sx={{ borderRadius: 2, minHeight: 44 }}>
-              <ListItemText primary="MainzWare" />
+              <ListItemText primary="Homepage" />
             </ListItemButton>
           </List>
         </Box>

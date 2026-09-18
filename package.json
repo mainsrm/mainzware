@@ -1,0 +1,10 @@
+{
+  "name": "mainzworld",
+  "private": true,
+  "description": "Repo-root scripts for the local MainzWorld dev stack. `npm run <script>` works from any directory in this repo (npm walks up to find the nearest package.json) except portal/frontend, which has its own matching scripts.",
+  "scripts": {
+    "start:stack": "bash start-mainzworld.sh",
+    "check:stack": "bash check-mainzworld.sh",
+    "clean:stack": "bash check-mainzworld.sh --clean"
+  }
+}

@@ -42,6 +42,16 @@ portal/
 
 ## Local Setup
 
+The fastest path: run `~/MainzWare/start-mainzworld.sh` (or `npm run start:stack` from
+the repo root or `portal/frontend`) from any directory — it starts the brew-managed
+Postgres/PHP-FPM/Apache daemons if needed and launches the Vite dev server in the
+foreground. Use `~/MainzWare/check-mainzworld.sh` / `--clean` (or `npm run check:stack` /
+`clean:stack`) to check for or kill stray/duplicate Vite processes on `:5173`+. See the
+comments at the top of `../check-mainzworld.sh` and `../start-mainzworld.sh` for every
+supported invocation form.
+
+Manual setup, if you'd rather not use the scripts:
+
 1. Frontend: `cd frontend && npm install && npm run dev` (serves on `http://localhost:5173`).
 2. API: point an Apache vhost's `DocumentRoot` at `portal/api/public` (e.g. `http://localhost:8080`),
    and run `composer install` inside `api/` once dependencies are added.
