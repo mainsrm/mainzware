@@ -62,9 +62,10 @@ There is one API contract, not a "web API" and a "mobile API." Concretely:
 
 Local-machine setup (Homebrew, `php.ini`, `httpd.conf`, `postgresql.conf`) is still
 in scope and still the primary hands-on responsibility. In addition, `devops` should
-maintain hosting *research and recommendations* in `research/hosting.md` (written by
-the `research` agent, consumed by `devops`) covering: managed Postgres options,
-object storage (S3-compatible) for receipt images, background worker/queue hosting
-for OCR, and horizontal scaling of the PHP API — evaluated against this phase plan,
-not just "what's live today." Actually provisioning remote/production infrastructure
-still requires explicit user confirmation per the agent's constraints.
+maintain hosting *research and recommendations* in
+`.github/agents/research/hosting.md` (written by the `research` agent, consumed by
+`devops`) covering: managed Postgres options, object storage (S3-compatible) for
+receipt images, background worker/queue hosting for OCR, and horizontal scaling of
+the PHP API — evaluated against this phase plan, not just "what's live today."
+Actually provisioning remote/production infrastructure still requires explicit user
+confirmation per the agent's constraints.

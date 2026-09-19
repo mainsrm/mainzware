@@ -36,8 +36,6 @@ portal/
       Config/Database.php  # PDO PostgreSQL connection (reads credentials from env vars)
       Data/                # Temporary static data until backed by real tables
     openapi.yaml          # Swagger/OpenAPI spec — source of truth for API routes/contracts
-  research/             # Shared best-practice notes, written by the `research` agent
-                          # and read by the accessibility/web-security/database/ui/api agents
 ```
 
 ## Local Setup
@@ -275,15 +273,11 @@ The homepage should return `200 OK`. The unauthenticated API check should return
 Never bypass certificate errors with `curl -k` during normal verification. If DNS is still cached,
 test the new VPS explicitly with `curl --resolve mainzware.com:443:129.121.142.227 -I https://mainzware.com`.
 
-## Agents
+## AI Development
 
-This project is built and maintained with a set of specialist agents (see the repo-root `.github/agents/` directory):
+AI development infrastructure for the MainzWare monorepo is maintained
+centrally in the repository-root `.github/agents/` directory.
 
-- `research` — investigates best practices, writes notes into `research/*.md`
-- `accessibility` — WCAG 2.1 compliance
-- `web-security` — OWASP-aligned hardening
-- `database` — PostgreSQL schema/queries
-- `api` — PHP REST endpoints + OpenAPI/Swagger spec
-- `ui` — React/Vite front-end implementation
-- `devops` — local Apache/PHP/PostgreSQL stack setup
-- `human-use` — maintainability-focused cleanup for readable, editable, easy-to-troubleshoot code
+Portal does not contain its own agent hierarchy, research directory, or
+knowledgebase. See `../ARCHITECTURE.md` for the repository-wide AI
+development architecture.

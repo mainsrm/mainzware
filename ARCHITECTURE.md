@@ -13,7 +13,55 @@ behind authentication).
 - **Archive** — frozen legacy, kept for reference, never deployed (`archive/`).
 
 ## Target structure
+## AI Development Architecture
 
+AI development infrastructure is repository-level infrastructure for the entire
+MainzWare monorepo.
+
+The canonical AI development system is located exclusively under:
+
+    .github/agents/
+
+This includes:
+
+- AI agent definitions (`*.agent.md`)
+- agent orchestration and handoffs
+- agent research
+- project-specific AI knowledgebase
+- agent-specific operating instructions
+- AI development supporting configuration
+
+No subproject, product, service, asset, archive, or other repository directory
+may contain its own:
+
+- `.github/agents/` directory
+- agent definition files
+- agent knowledgebase
+- agent research hierarchy
+- competing agent orchestration structure
+- competing AI development team or hierarchy
+
+AI agents operate across repository boundaries as required. They are organized
+by engineering discipline and responsibility, not by the directory containing
+the code being modified.
+
+Application and service directories contain the code, documentation,
+configuration, tests, assets, and other artifacts belonging to that product or
+service. They do not own the MainzWare AI development infrastructure.
+
+The repository-root `.github/agents/` directory is the single canonical location
+for the MainzWare AI development team.
+
+### AI context boundaries
+
+- `.github/agents/*.agent.md` — roles, responsibilities, constraints, and operating behavior.
+- `.github/agents/knowledgebase/` — durable, MainzWare-specific facts about how systems actually work.
+- `.github/agents/research/` — general/reusable best-practice research and authoritative guidance.
+- Product/service documentation — product requirements, architecture, operation, and roadmap information belonging to that product/service.
+- `archive/` — frozen legacy reference unless explicitly authorized.
+
+A product README may reference the central AI system, but must not redefine or
+duplicate the AI hierarchy.
 ```
 MainzWare/                      # company monorepo (single git repo at this root)
 ├── .github/                    # ONE agents folder + knowledgebase + workflows
@@ -70,7 +118,7 @@ Product boundaries are now mirrored with PostgreSQL schemas instead of one flat
 highest-risk change in the repo (production data lived in `public`) and is
 now live on production, alongside the credential split described below. See
 `.github/agents/knowledgebase/db-migrations.md` for the full mechanism and
-`portal/research/security.md` for the two review passes.
+`.github/agents/knowledgebase/db-migrations.md` for the two review passes.
 
 The migration credential is split from the runtime credential. **Done
 2026-09-16.** Prod's `public`/now
@@ -78,7 +126,7 @@ The migration credential is split from the runtime credential. **Done
 the running web app now connects as a new `mainzworld_runtime` role
 (SELECT/INSERT/UPDATE/DELETE only), while `mainzworld_app` is used solely by
 `bin/migrate_db.php` via `Database::migratorConnection()`. See
-`.github/agents/knowledgebase/db-migrations.md` and `portal/research/security.md`
+`.github/agents/knowledgebase/db-migrations.md`
 for the rollout, the review, and an incident encountered along the way
 (unrelated to the design: a hardcoded credential in the php-fpm pool config
 that isn't wired to `.env`, discovered and documented, not yet fully fixed).
@@ -99,8 +147,7 @@ that isn't wired to `.env`, discovered and documented, not yet fully fixed).
 Phase 4 (the two deploy-touching renames) is complete pending a Security review.
 Phase 7 (DB schemas) is complete, including its required Security review, per
 the gatekeeping rules in `.github/agents/director.agent.md` (second pass,
-2026-09-16 — see `portal/research/security.md`). It ran as an attended
-production window, gated behind an arming row so no deploy could apply it
+2026-09-16 — see `.github/agents/knowledgebase/db-migrations.md`). It ran as an attended production window, gated behind an arming row so no deploy could apply it
 unattended; see the runbook in `.github/agents/knowledgebase/db-migrations.md`.
 
 ## See also

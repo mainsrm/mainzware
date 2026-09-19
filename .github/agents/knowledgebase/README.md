@@ -4,7 +4,7 @@ Durable, factual documentation of **how this project's systems actually work** â
 not troubleshooting logs, not one-off incident write-ups. If something here stops
 being true (the mechanism changes), update the file; don't append a new one.
 
-This is distinct from `portal/research/*.md`, which holds general industry
+This is distinct from `.github/agents/research/*.md`, which holds general industry
 best practices (WCAG, OWASP, etc.) that apply to any project. Files here are
 specific to how *this* codebase is built and wired together.
 
