@@ -61,6 +61,45 @@ final class PropertyListsController
         echo json_encode(PropertyLists::itemsForUser((int) $user['id'], $id), JSON_THROW_ON_ERROR);
     }
 
+    public function update(int $id): void
+    {
+        header('Content-Type: application/json');
+        $user = Auth::requireLogin();
+        if ($user === null) return;
+
+        $body = json_decode(file_get_contents('php://input') ?: '{}', true);
+        $name = trim((string) ($body['name'] ?? ''));
+        $propertyIds = $body['property_ids'] ?? [];
+
+        if ($name === '' || strlen($name) > 255) {
+            http_response_code(400);
+            echo json_encode(['error' => 'A list name between 1 and 255 characters is required.']);
+            return;
+        }
+        if (!is_array($propertyIds)) {
+            http_response_code(400);
+            echo json_encode(['error' => 'property_ids must be an array.']);
+            return;
+        }
+
+        try {
+            PropertyLists::update((int) $user['id'], $id, $name, $propertyIds);
+        } catch (\InvalidArgumentException $error) {
+            http_response_code(404);
+            echo json_encode(['error' => $error->getMessage()]);
+            return;
+        } catch (\PDOException $error) {
+            if ($error->getCode() === '23505') {
+                http_response_code(409);
+                echo json_encode(['error' => 'You already have a list with that name.']);
+                return;
+            }
+            throw $error;
+        }
+
+        echo json_encode(['ok' => true], JSON_THROW_ON_ERROR);
+    }
+
     public function delete(int $id): void
     {
         header('Content-Type: application/json');

@@ -2,9 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND_DIR="$ROOT_DIR/frontend"
-API_DIR="$ROOT_DIR/api"
-SCRAPER_DIR="$ROOT_DIR/../services/property-scraper"
+PORTAL_DIR="$ROOT_DIR/portal"
+FRONTEND_DIR="$PORTAL_DIR/frontend"
+API_DIR="$PORTAL_DIR/api"
+SCRAPER_DIR="$ROOT_DIR/services/property-scraper"
 RELEASE_DIR="$(mktemp -d /tmp/mainzware-release.XXXXXX)"
 ARCHIVE="${RELEASE_DIR}.tar.gz"
 REMOTE="${DEPLOY_REMOTE:-root@129.121.142.227}"
@@ -25,7 +26,7 @@ mkdir -p "$RELEASE_DIR/frontend" "$RELEASE_DIR/api" "$RELEASE_DIR/SaleAddressMap
 rsync -a "$FRONTEND_DIR/dist/" "$RELEASE_DIR/frontend/"
 rsync -a --exclude='.env' --exclude='public/uploads/' "$API_DIR/" "$RELEASE_DIR/api/"
 rsync -a --exclude='.venv/' --exclude='output/' "$SCRAPER_DIR/" "$RELEASE_DIR/SaleAddressMapper/"
-rsync -a "$ROOT_DIR/deploy/" "$RELEASE_DIR/deploy/"
+rsync -a "$PORTAL_DIR/deploy/" "$RELEASE_DIR/deploy/"
 
 tar -czf "$ARCHIVE" -C "$(dirname "$RELEASE_DIR")" "$(basename "$RELEASE_DIR")"
 

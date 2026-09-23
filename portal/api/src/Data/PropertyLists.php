@@ -82,6 +82,40 @@ final class PropertyLists
         }
     }
 
+    public static function update(int $userId, int $listId, string $name, array $propertyIds): void
+    {
+        $pdo = Database::connection();
+        $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare(
+                'UPDATE property_lists SET name = :name, updated_at = now() WHERE id = :id AND user_id = :user_id'
+            );
+            $stmt->execute(['name' => $name, 'id' => $listId, 'user_id' => $userId]);
+            if ($stmt->rowCount() === 0) {
+                throw new \InvalidArgumentException('Property list not found.');
+            }
+
+            $pdo->prepare('DELETE FROM property_list_items WHERE list_id = :list_id')
+                ->execute(['list_id' => $listId]);
+
+            $item = $pdo->prepare(
+                'INSERT INTO property_list_items
+                    (list_id, property_id, address, county, state, sale_status, sale_group, parcel, map_url, source_url, sri_id, sri_property_id)
+                 SELECT :list_id, id, address, county, state, sale_status, sale_group, parcel, map_url, source_url, sri_id, sri_property_id
+                 FROM sale_properties WHERE id = :property_id
+                 ON CONFLICT DO NOTHING'
+            );
+            foreach ($propertyIds as $propertyId) {
+                $item->execute(['list_id' => $listId, 'property_id' => (int) $propertyId]);
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $error) {
+            $pdo->rollBack();
+            throw $error;
+        }
+    }
+
     public static function delete(int $userId, int $listId): void
     {
         $stmt = Database::connection()->prepare(

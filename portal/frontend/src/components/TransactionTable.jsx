@@ -19,6 +19,7 @@ import TableRow from '@mui/material/TableRow';
 import TableSortLabel from '@mui/material/TableSortLabel';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
+import Typography from '@mui/material/Typography';
 import apiClient from '../api/client';
 
 export default function TransactionTable({ transactions, categories, canWrite, onChanged, ariaLabel = 'Budget transactions' }) {
@@ -129,6 +130,8 @@ export default function TransactionTable({ transactions, categories, canWrite, o
     }
   };
 
+  const filteredTotal = filteredTransactions.reduce((sum, transaction) => sum + Number(transaction.amount || 0), 0);
+
   return (
     <>
       <TextField
@@ -139,6 +142,9 @@ export default function TransactionTable({ transactions, categories, canWrite, o
         onChange={(event) => setTransactionSearch(event.target.value)}
         sx={{ mb: 2 }}
       />
+      <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700 }}>
+        Total: ${filteredTotal.toFixed(2)} ({filteredTransactions.length} transaction{filteredTransactions.length === 1 ? '' : 's'})
+      </Typography>
       <TableContainer component={Paper}>
         <Table stickyHeader aria-label={ariaLabel}>
           <TableHead sx={{

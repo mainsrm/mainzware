@@ -21,7 +21,7 @@ Read:
 - root `ARCHITECTURE.md` when boundaries are involved;
 - relevant `.github/agents/knowledgebase/` entries;
 - `.github/agents/research/ui.md` when current frontend guidance is needed;
-- `portal/PRODUCT_VISION.md` when the work affects the Portal/Budgeteer direction.
+- `PRODUCT_VISION.md` when the work affects the Portal/Budgeteer direction.
 
 Inspect existing components, routing, styling, and API-client conventions before adding anything.
 

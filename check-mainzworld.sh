@@ -11,9 +11,11 @@
 #
 # Reports whether Postgres/PHP-FPM/Apache are up and flags duplicate PIDs on
 # their ports (never kills them — they're brew daemons managed separately).
-# Also reports Vite dev/preview ports and any orphaned vite/esbuild processes
-# not attached to a listening port (typically hung/stale). --clean kills only
-# those frontend-owned processes.
+# Also checks php-fpm.log for workers that have segfaulted since the last
+# restart (e.g. the macOS Kerberos/libpq GSS fork-safety crash) and reports
+# Vite dev/preview ports plus any orphaned vite/esbuild processes not attached
+# to a listening port (typically hung/stale). --clean restarts a crashing
+# PHP-FPM and kills stray/duplicate frontend processes.
 #
 set -uo pipefail
 
@@ -40,6 +42,27 @@ for port in "${DAEMON_PORTS[@]}"; do
     printf '  :%-5s %s  %s worker(s), pid(s): %s\n' "$port" "$(green UP)" "$n" "$(echo "$pids" | tr '\n' ' ')"
   fi
 done
+
+echo
+echo "== PHP-FPM stability (segfault check since last restart) =="
+FPM_LOG="$(brew --prefix)/var/log/php-fpm.log"
+fpm_needs_restart=false
+if [[ -f "$FPM_LOG" ]]; then
+  last_start_line=$(grep -n 'NOTICE: fpm is running' "$FPM_LOG" | tail -1 | cut -d: -f1 || true)
+  if [[ -n "$last_start_line" ]]; then
+    segfaults=$(tail -n +"$last_start_line" "$FPM_LOG" | grep -c 'SIGSEGV' || true)
+  else
+    segfaults=$(grep -c 'SIGSEGV' "$FPM_LOG" || true)
+  fi
+  if [[ "${segfaults:-0}" -gt 0 ]]; then
+    echo "  $(red "${segfaults} crash(es)") since PHP-FPM last started — workers are segfaulting on every request."
+    fpm_needs_restart=true
+  else
+    echo "  $(green 'No crashes') since PHP-FPM last started."
+  fi
+else
+  echo "  log not found, skipping ($FPM_LOG)"
+fi
 
 echo
 echo "== Vite dev/preview ports =="
@@ -72,17 +95,26 @@ done
 echo
 if [[ "$CLEAN" == true ]]; then
   if [[ ${#kill_list[@]} -eq 0 ]]; then
-    echo "Nothing to clean."
+    echo "Nothing to clean on the Vite ports."
   else
     unique=($(printf '%s\n' "${kill_list[@]}" | sort -un))
     echo "Killing stray/duplicate Vite processes: ${unique[*]}"
     kill -9 "${unique[@]}" 2>/dev/null || true
-    echo "$(green Done.) Postgres/PHP-FPM/Apache daemons were left untouched."
+    echo "$(green Done.)"
   fi
+  if [[ "$fpm_needs_restart" == true ]]; then
+    echo "Restarting PHP-FPM to clear crashed workers..."
+    brew services restart php >/dev/null 2>&1 && echo "$(green Done.) PHP-FPM restarted."
+  fi
+  [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false ]] && echo "$(green Stack is clean.)"
 else
   if [[ ${#kill_list[@]} -gt 0 ]]; then
     echo "Run with --clean to kill the stray/duplicate Vite processes listed above."
-  else
+  fi
+  if [[ "$fpm_needs_restart" == true ]]; then
+    echo "Run with --clean to restart PHP-FPM and clear the crashed workers."
+  fi
+  if [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false ]]; then
     echo "Stack looks clean."
   fi
 fi

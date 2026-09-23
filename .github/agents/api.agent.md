@@ -28,7 +28,7 @@ Read:
 
 - the affected product/service README;
 - relevant `.github/agents/knowledgebase/` entries;
-- `portal/PRODUCT_VISION.md` when the task concerns Budgeteer/web/mobile API compatibility;
+- `PRODUCT_VISION.md` when the task concerns Budgeteer/web/mobile API compatibility;
 - the existing OpenAPI specification before changing routes/contracts.
 
 ## Constraints

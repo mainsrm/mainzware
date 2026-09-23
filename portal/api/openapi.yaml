@@ -131,6 +131,22 @@ paths:
           description: Saved property records, including archived status
         '401':
           description: Login required
+    put:
+      summary: Replace the name and property set of a list owned by the logged-in user
+      operationId: updatePropertyList
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Updated
+        '404':
+          description: List not found
+        '409':
+          description: List name already exists for this user
     delete:
       summary: Delete a property list owned by the logged-in user
       operationId: deletePropertyList

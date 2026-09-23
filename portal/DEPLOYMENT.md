@@ -53,6 +53,15 @@ grep -o '^[A-Z_]*' portal/api/.env.example | sort | comm -23 - /tmp/prod-env-key
 
 Anything printed is in the example but missing from production.
 
+There is a second, easier-to-miss layer for anything `SaleScraper` needs: the
+web-triggered scrape (adding a county in the admin UI) runs inside a PHP-FPM
+worker, which does **not** read `.env` at all -- it only sees the pool's own
+hardcoded `env[...]` lines (see `portal/README.md`'s "Production Environment"
+section). `MAINZWORLD_SCRAPER_DIR` and `PLAYWRIGHT_BROWSERS_PATH` must be
+added there too, or the web-triggered scrape fails instantly
+(`scrape_state = 'error'`) even while `.env` and `check_env.php` both look
+correct and the hourly systemd timer keeps working fine.
+
 ## Generated Artifacts
 
 These are required in the deployed runtime but intentionally ignored by Git:

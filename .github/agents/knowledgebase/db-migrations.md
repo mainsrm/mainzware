@@ -29,7 +29,7 @@ php portal/api/bin/migrate_db.php
 ## Where it's wired in
 
 - **Local:** run manually after adding a migration file.
-- **Deploy:** [`deploy-mainzware.sh`](../../portal/deploy-mainzware.sh) runs
+- **Deploy:** [`deploy-mainzware.sh`](../../deploy-mainzware.sh) runs
   it automatically on the VPS during every deploy, right after `.env` is
   restored (it sources `.env` in a scoped subshell first, since PHP-FPM's own
   environment isn't available to that shell).

@@ -83,6 +83,11 @@ final class Router
             return;
         }
 
+        if ($method === 'PUT' && preg_match('#^/api/v1/property-lists/(\d+)$#', $path, $m)) {
+            (new PropertyListsController())->update((int) $m[1]);
+            return;
+        }
+
         if ($method === 'DELETE' && preg_match('#^/api/v1/property-lists/(\d+)$#', $path, $m)) {
             (new PropertyListsController())->delete((int) $m[1]);
             return;

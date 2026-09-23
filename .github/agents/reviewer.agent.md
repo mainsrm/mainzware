@@ -38,7 +38,7 @@ Read only the relevant documentation needed for the change. In particular:
 - root `ARCHITECTURE.md`;
 - relevant product/service README;
 - relevant knowledgebase entries;
-- `portal/PRODUCT_VISION.md` when the change affects the current Portal/Budgeteer direction.
+- `PRODUCT_VISION.md` when the change affects the current Portal/Budgeteer direction.
 
 ## Guardrails
 

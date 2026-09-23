@@ -37,7 +37,9 @@ final class Database
         // Managed hosts (DigitalOcean, AWS, etc.) require TLS; local dev leaves this unset.
         $sslmode = getenv('MAINZWORLD_DB_SSLMODE') ?: null;
 
-        $dsn = "pgsql:host={$host};port={$port};dbname={$dbname}";
+        // Disable GSS encryption negotiation: on macOS, libpq's GSSAPI path calls into
+        // Kerberos/CoreFoundation, which isn't fork-safe and segfaults PHP-FPM's forked workers.
+        $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};gssencmode=disable";
         if ($sslmode !== null && $sslmode !== '') {
             $dsn .= ";sslmode={$sslmode}";
         }

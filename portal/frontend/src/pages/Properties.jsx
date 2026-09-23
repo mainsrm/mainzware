@@ -19,6 +19,7 @@ import TextField from '@mui/material/TextField';
 import Fab from '@mui/material/Fab';
 import AddIcon from '@mui/icons-material/Add';
 import SaveIcon from '@mui/icons-material/Save';
+import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { visuallyHidden } from '@mui/utils';
@@ -254,19 +255,20 @@ export default function Properties() {
     setSavingList(true);
     try {
       const savedIds = Array.from(selectedIds);
-      const response = await apiClient.post('/property-lists', {
-        name: listName.trim(),
-        property_ids: savedIds,
-      });
+      const trimmedName = listName.trim();
+      const response = activeListId === null
+        ? await apiClient.post('/property-lists', { name: trimmedName, property_ids: savedIds })
+        : await apiClient.put(`/property-lists/${activeListId}`, { name: trimmedName, property_ids: savedIds });
+      const listId = activeListId === null ? response.data.id : activeListId;
       const listsResponse = await apiClient.get('/property-lists');
       setLists(listsResponse.data);
-      setListName('');
+      setListName(trimmedName);
       setSelectedIds(new Set(savedIds));
-      setActiveListId(response.data.id);
-      const savedProperties = await apiClient.get(`/property-lists/${response.data.id}`);
+      setActiveListId(listId);
+      const savedProperties = await apiClient.get(`/property-lists/${listId}`);
       setActiveListProperties(savedProperties.data);
       setListEditorOpen(false);
-      setSnackbar('Custom property list saved.');
+      setSnackbar(activeListId === null ? 'Custom property list saved.' : 'Custom property list updated.');
     } catch (error) {
       setSnackbar(error.response?.data?.error || 'Could not save the property list.');
     } finally {
@@ -282,6 +284,14 @@ export default function Properties() {
     const response = await apiClient.get(`/property-lists/${list.id}`);
     setActiveListProperties(response.data);
     setSnackbar(`Opened ${list.name} — ${list.property_count} selected properties.`);
+  };
+
+  const editActiveList = () => setListEditorOpen(true);
+
+  const cancelEditActiveList = () => {
+    const list = lists.find((item) => item.id === activeListId);
+    if (list) openList(list);
+    else setListEditorOpen(false);
   };
 
   const showAllProperties = () => {
@@ -313,7 +323,7 @@ export default function Properties() {
     }
   };
 
-  const baseProperties = activeListId === null
+  const baseProperties = (activeListId === null || listEditorOpen)
     ? properties
     : activeListProperties;
 
@@ -581,18 +591,24 @@ export default function Properties() {
         </Button>
       </Stack>
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-        <Button
-          variant={listEditorOpen ? 'outlined' : 'contained'}
-          startIcon={<AddIcon />}
-          onClick={toggleListEditor}
-        >
-          {listEditorOpen ? 'Close Custom List' : 'Save Custom List'}
-        </Button>
-        {activeListId !== null && (
+        {activeListId === null && (
+          <Button
+            variant={listEditorOpen ? 'outlined' : 'contained'}
+            startIcon={<AddIcon />}
+            onClick={toggleListEditor}
+          >
+            {listEditorOpen ? 'Close Custom List' : 'Save Custom List'}
+          </Button>
+        )}
+        {activeListId !== null && !listEditorOpen && (
           <>
+            <Button variant="outlined" startIcon={<EditIcon />} onClick={editActiveList}>Edit List</Button>
             <Button variant="text" onClick={showAllProperties}>Show All Properties</Button>
             <Button color="error" startIcon={<DeleteIcon />} onClick={deleteActiveList}>Delete List</Button>
           </>
+        )}
+        {activeListId !== null && listEditorOpen && (
+          <Button variant="outlined" onClick={cancelEditActiveList}>Cancel Edit</Button>
         )}
         {lists.length > 0 && (
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -638,12 +654,12 @@ export default function Properties() {
               '& .MuiTableSortLabel-root.Mui-focusVisible': { outline: '3px solid #ffffff', outlineOffset: '2px' },
             }}>
               <TableRow>
-                {listEditorOpen && activeListId === null && <TableCell>Select</TableCell>}
+                {listEditorOpen && <TableCell>Select</TableCell>}
                 {sortableHeader('Address', 'address')}
                 {sortableHeader('County / State', 'county')}
                 {sortableHeader('Status', 'sale_status')}
                 {sortableHeader('Sale Group', 'sale_group')}
-                {activeListId !== null && sortableHeader('Listing Status', 'archived')}
+                {activeListId !== null && !listEditorOpen && sortableHeader('Listing Status', 'archived')}
                 {sortableHeader('Parcel #', 'parcel')}
                 <TableCell>Map</TableCell>
                 <TableCell>Parcel Lookup</TableCell>
@@ -654,7 +670,7 @@ export default function Properties() {
                 const countyGisUrl = parcelGisUrl(property.county, property.state, gisSources);
                 return (
                   <TableRow key={property.id}>
-                    {listEditorOpen && activeListId === null && (
+                    {listEditorOpen && (
                       <TableCell padding="checkbox">
                         <FormControlLabel
                           label=""
@@ -674,7 +690,7 @@ export default function Properties() {
                     </TableCell>
                     <TableCell>{property.sale_status || '—'}</TableCell>
                     <TableCell>{property.sale_group || '—'}</TableCell>
-                    {activeListId !== null && (
+                    {activeListId !== null && !listEditorOpen && (
                       <TableCell>
                         {property.archived ? (
                           <Chip label="No longer on sale site" color="warning" size="small" />

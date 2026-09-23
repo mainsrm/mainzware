@@ -5,7 +5,7 @@ OpenAPI/Swagger), which talks to PostgreSQL. It hosts the behind-authentication 
 (properties, budget, projects) and currently also serves the public MainzWare homepage.
 See [ARCHITECTURE.md](../ARCHITECTURE.md) for how this fits the wider monorepo.
 
-See [PRODUCT_VISION.md](PRODUCT_VISION.md) for the roadmap: the budgeting feature here is
+See [PRODUCT_VISION.md](../PRODUCT_VISION.md) for the roadmap: the budgeting feature here is
 becoming **Budgeteer**, a standalone web + mobile budgeting product with receipt-photo
 itemization. Every specialist agent should read that file before making architectural changes.
 
@@ -148,7 +148,7 @@ contain `api/.env`; production secrets are created only on the VPS.
 The easiest supported workflow is the repository script:
 
 ```bash
-cd /Users/mains/MainzWare/MainzWorld
+cd /Users/mains/MainzWare
 ./deploy-mainzware.sh
 ```
 
@@ -198,6 +198,17 @@ untouched by `.env` edits or by `deploy-mainzware.sh`. Rotating any DB
 credential later means updating **both** files and restarting php-fpm --
 missing the pool file causes every DB-backed request to fail authentication
 while `.env`-only checks (`check_env.php`, a manual `migrate_db.php` run)
+
+This bites the scraper specifically: `SaleScraper::dispatchWorker()` (the path
+that runs when a county is added in the admin UI) is spawned from a web
+request, so it inherits **the FPM pool's** environment, not `.env`. Add
+`env[MAINZWORLD_SCRAPER_DIR]` and, if the scraper's Playwright browsers were
+installed to a non-default path, `env[PLAYWRIGHT_BROWSERS_PATH]` to
+`/etc/php/8.3/fpm/pool.d/www.conf` as well, or every "add a county" scrape
+fails instantly (`scrape_state = 'error'`) even though the hourly systemd
+timer -- which reads `.env` directly via `EnvironmentFile=` -- keeps working
+fine. `check_env.php` cannot catch this because it only validates `.env`, not
+the pool file.
 continue to report success. See `.github/agents/knowledgebase/db-migrations.md`
 for the incident this caused once already.
 

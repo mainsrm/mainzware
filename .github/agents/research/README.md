@@ -7,7 +7,7 @@ notes for the matching specialist agent to read before making changes.
 - `database.md` → read by the `database` agent (PostgreSQL)
 - `ui.md` → read by the `ui` agent (front-end)
 - `hosting.md` → read by the `devops` agent (production hosting, scaling toward the
-  Budgeteer mobile app — see `portal/PRODUCT_VISION.md` for why)
+  Budgeteer mobile app — see `PRODUCT_VISION.md` for why)
 
 General security research should be added as `.github/agents/research/security.md`
 when there is actual general/reusable security guidance to preserve. The former security notes were project-specific security/incident material and

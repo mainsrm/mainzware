@@ -22,7 +22,7 @@ Read:
 1. root `ARCHITECTURE.md`;
 2. the relevant product/service README;
 3. relevant `.github/agents/knowledgebase/` entries;
-4. relevant product plans such as `PRODUCT_VISION.md` when the change concerns Budgeteer or the product roadmap.
+4. relevant product plans such as `PRODUCT_VISION.md` (repo root) when the change concerns Budgeteer or the product roadmap.
 
 Inspect existing code and configuration before proposing new abstractions.
 
