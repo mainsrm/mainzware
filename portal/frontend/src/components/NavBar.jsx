@@ -155,7 +155,7 @@ export default function NavBar() {
                 onClose={() => setAccountMenuAnchor(null)}
                 open={Boolean(accountMenuAnchor)}
               >
-                <MenuItem component={NavLink} onClick={() => setAccountMenuAnchor(null)} to="/profile">My Profile</MenuItem>
+                <MenuItem component={NavLink} onClick={() => setAccountMenuAnchor(null)} to="/profile">Preferences</MenuItem>
                 <MenuItem onClick={async () => {
                   setAccountMenuAnchor(null);
                   await logout();

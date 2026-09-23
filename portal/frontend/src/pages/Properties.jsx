@@ -648,11 +648,7 @@ export default function Properties() {
       ) : (
         <TableContainer component={Paper}>
           <Table stickyHeader aria-label="Property sales">
-            <TableHead sx={{
-              '& .MuiTableCell-head': { backgroundColor: '#2f6f8f', color: '#ffffff', fontWeight: 700, whiteSpace: 'nowrap' },
-              '& .MuiTableSortLabel-icon': { color: 'inherit', opacity: 1 },
-              '& .MuiTableSortLabel-root.Mui-focusVisible': { outline: '3px solid #ffffff', outlineOffset: '2px' },
-            }}>
+            <TableHead>
               <TableRow>
                 {listEditorOpen && <TableCell>Select</TableCell>}
                 {sortableHeader('Address', 'address')}

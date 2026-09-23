@@ -186,6 +186,36 @@ paths:
           description: Current user
         '401':
           description: Not logged in
+  /preferences:
+    get:
+      summary: Get the current user's portal preferences
+      operationId: getPortalPreferences
+      responses:
+        '200':
+          description: Portal preferences, defaulting to light color mode
+        '401':
+          description: Login required
+    put:
+      summary: Update the current user's portal preferences
+      operationId: updatePortalPreferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [color_mode]
+              properties:
+                color_mode:
+                  type: string
+                  enum: [light, dark]
+      responses:
+        '200':
+          description: Updated portal preferences
+        '400':
+          description: Invalid color mode
+        '401':
+          description: Login required
   /users:
     get:
       summary: List users (admin only)
@@ -717,4 +747,3 @@ components:
         account:
           type: string
           nullable: true
-

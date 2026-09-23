@@ -147,11 +147,7 @@ export default function TransactionTable({ transactions, categories, canWrite, o
       </Typography>
       <TableContainer component={Paper}>
         <Table stickyHeader aria-label={ariaLabel}>
-          <TableHead sx={{
-            '& .MuiTableCell-head': { backgroundColor: '#2f6f8f', color: '#ffffff', fontWeight: 700, whiteSpace: 'nowrap' },
-            '& .MuiTableSortLabel-icon': { color: 'inherit', opacity: 1 },
-            '& .MuiTableSortLabel-root.Mui-focusVisible': { outline: '3px solid #ffffff', outlineOffset: '2px' },
-          }}>
+          <TableHead>
             <TableRow>
               {sortableHeader('Date', 'transaction_date')}
               {sortableHeader('Description', 'description')}

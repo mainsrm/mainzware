@@ -72,11 +72,7 @@ export default function BudgetVariance({ budgetId, month, canWrite }) {
   return (
     <TableContainer component={Paper} sx={{ mb: 3 }}>
       <Table stickyHeader aria-label="Budget vs actual for the current month">
-        <TableHead sx={{
-          '& .MuiTableCell-head': { backgroundColor: '#2f6f8f', color: '#ffffff', fontWeight: 700, whiteSpace: 'nowrap' },
-          '& .MuiTableSortLabel-icon': { color: 'inherit', opacity: 1 },
-          '& .MuiTableSortLabel-root.Mui-focusVisible': { outline: '3px solid #ffffff', outlineOffset: '2px' },
-        }}>
+        <TableHead>
           <TableRow>
             {sortableHeader('Category', 'category')}
             {sortableHeader('Budgeted amount', 'budgeted_amount', 'right')}

@@ -164,11 +164,7 @@ export default function WhereDaMoney() {
       {!selectedCategory && categoryTotals.length > 0 && (
         <TableContainer component={Paper} sx={{ mb: 3 }}>
           <Table stickyHeader aria-label="Spending by category">
-            <TableHead sx={{
-              '& .MuiTableCell-head': { backgroundColor: '#2f6f8f', color: '#ffffff', fontWeight: 700, whiteSpace: 'nowrap' },
-              '& .MuiTableSortLabel-icon': { color: 'inherit', opacity: 1 },
-              '& .MuiTableSortLabel-root.Mui-focusVisible': { outline: '3px solid #ffffff', outlineOffset: '2px' },
-            }}>
+            <TableHead>
               <TableRow>
                 {sortableCategoryHeader('Category', 'category')}
                 {sortableCategoryHeader('Actual spent', 'actual_spent', 'right')}

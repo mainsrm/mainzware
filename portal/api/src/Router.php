@@ -9,6 +9,7 @@ use MainzWorld\Controllers\ContentController;
 use MainzWorld\Controllers\DebtsController;
 use MainzWorld\Controllers\MarketController;
 use MainzWorld\Controllers\ProjectsController;
+use MainzWorld\Controllers\PreferencesController;
 use MainzWorld\Controllers\PropertiesController;
 use MainzWorld\Controllers\PropertyListsController;
 use MainzWorld\Controllers\ScrapeSourcesController;
@@ -265,6 +266,16 @@ final class Router
 
         if ($method === 'POST' && $path === '/api/v1/auth/password') {
             (new AuthController())->changePassword();
+            return;
+        }
+
+        if ($method === 'GET' && $path === '/api/v1/preferences') {
+            (new PreferencesController())->show();
+            return;
+        }
+
+        if ($method === 'PUT' && $path === '/api/v1/preferences') {
+            (new PreferencesController())->update();
             return;
         }
 
