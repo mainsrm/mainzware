@@ -5,11 +5,14 @@ import Typography from '@mui/material/Typography';
 import { Link as RouterLink } from 'react-router-dom';
 
 export default function ProjectCard({ project }) {
+  const navigation = project.external
+    ? { component: 'a', href: project.url }
+    : { component: RouterLink, to: project.url };
+
   return (
     <Card sx={{ height: '100%' }}>
       <CardActionArea
-        component={RouterLink}
-        to={project.url}
+        {...navigation}
         aria-label={`Open ${project.name}`}
         sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}
       >

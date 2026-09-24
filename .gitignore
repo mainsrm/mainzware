@@ -34,3 +34,4 @@ __pycache__/
 # Generated reports and user uploads
 services/property-scraper/output/
 portal/api/public/uploads/
+live-worship/api/storage/

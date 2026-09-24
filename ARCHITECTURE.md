@@ -73,6 +73,9 @@ MainzWare/                      # company monorepo (single git repo at this root
 │   ├── frontend/               #   React (Vite)
 │   └── api/                    #   PHP REST API
 │       └── db_migrations/
+├── live-worship/                # standalone worship product, launched from the portal
+│   ├── frontend/               #   independently built React application
+│   └── api/                    #   app-owned PHP API, migrations, and private page storage
 ├── budgeteer/                  # new budget product: web rebuild + mobile app
 ├── brand/                      # (was "Logos") merch, logos, marketing assets
 ├── services/
@@ -111,14 +114,14 @@ MainzWare/                      # company monorepo (single git repo at this root
   `Jwt.php`, the vhost, prod `.env`, and the systemd `EnvironmentFile`);
   renaming them adds risk for no user-facing benefit.
 
-## Database philosophy — DONE 2026-09-16
+## Database product boundaries
 
-Product boundaries are now mirrored with PostgreSQL schemas instead of one flat
-`public` schema (`portal.*`, `budget.*`, shared `auth.users`). This was the
-highest-risk change in the repo (production data lived in `public`) and is
-now live on production, alongside the credential split described below. See
-`.github/agents/knowledgebase/db-migrations.md` for the full mechanism and
-`.github/agents/knowledgebase/db-migrations.md` for the two review passes.
+Product boundaries use PostgreSQL schemas (`portal.*`, `budget.*`,
+`live_worship.*`, and shared `auth.users`). The portal/Budgeteer split from
+`public` is live in production. Live Worship owns its schema and migrations under
+`live-worship/api/`; that migration is applied by the app's own runner. See
+`.github/agents/knowledgebase/db-migrations.md` for the portal schema split and
+credential runbooks.
 
 The migration credential is split from the runtime credential. **Done
 2026-09-16.** Prod's `public`/now
@@ -142,7 +145,7 @@ that isn't wired to `.env`, discovered and documented, not yet fully fixed).
 | `SaleAddressMapper` | `services/property-scraper` | done |
 | `MainzWorld` | `portal` | done |
 | `Python/Debt Snowball Forecaster` | portal feature (React + PHP + PostgreSQL) | done |
-| `public.*` DB | `portal.*` / `budget.*` schemas | done |
+| `public.*` DB | `portal.*` / `budget.*` schemas; `live_worship.*` app schema | portal/budget split done; Live Worship added |
 
 Phase 4 (the two deploy-touching renames) is complete pending a Security review.
 Phase 7 (DB schemas) is complete, including its required Security review, per

@@ -15,7 +15,8 @@
 # restart (e.g. the macOS Kerberos/libpq GSS fork-safety crash) and reports
 # Vite dev/preview ports plus any orphaned vite/esbuild processes not attached
 # to a listening port (typically hung/stale). --clean restarts a crashing
-# PHP-FPM and kills stray/duplicate frontend processes.
+# PHP-FPM and kills stray/duplicate frontend processes. Checks Live Worship's
+# photo-service health endpoint; --clean also stops confirmed stuck OCR workers.
 #
 set -uo pipefail
 
@@ -25,6 +26,8 @@ yellow() { printf '\033[33m%s\033[0m' "$1"; }
 
 CLEAN=false
 [[ "${1:-}" == "--clean" ]] && CLEAN=true
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+WORSHIP_OCR_DIR="$ROOT_DIR/live-worship/ocr"
 
 DAEMON_PORTS=(5432 9000 8080)    # Postgres, PHP-FPM, Apache — report only
 VITE_PORTS=(5173 5174 5175 4173) # Vite dev/preview — safe to clean
@@ -42,6 +45,40 @@ for port in "${DAEMON_PORTS[@]}"; do
     printf '  :%-5s %s  %s worker(s), pid(s): %s\n' "$port" "$(green UP)" "$n" "$(echo "$pids" | tr '\n' ' ')"
   fi
 done
+
+echo
+echo "== Live Worship photo service (:8765) =="
+ocr_needs_attention=false
+ocr_stuck_pids=()
+is_worship_ocr_pid() {
+  local cwd command
+  cwd=$(lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+  command=$(ps -p "$1" -o command= 2>/dev/null)
+  [[ "$cwd" == "$WORSHIP_OCR_DIR" && "$command" == *Python*server.py* ||
+     "$cwd" == "$WORSHIP_OCR_DIR" && "$command" == *python*server.py* ]]
+}
+ocr_pids=$(pids_on_port 8765)
+if [[ -z "$ocr_pids" ]]; then
+  echo "  $(yellow 'NOT RUNNING') — photo imports are unavailable."
+  ocr_needs_attention=true
+else
+  ocr_health=$(curl --noproxy '*' --silent --fail --connect-timeout 2 --max-time 5 http://127.0.0.1:8765/health 2>/dev/null)
+  ocr_health_status=$?
+  if [[ "$ocr_health_status" -eq 0 ]] && printf '%s' "$ocr_health" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'; then
+    echo "  $(green HEALTHY) — photo service responds to its health check."
+  else
+    ocr_needs_attention=true
+    echo "  $(red UNHEALTHY) — port is open, but the photo-service health check failed."
+    for pid in $ocr_pids; do
+      if is_worship_ocr_pid "$pid"; then
+        echo "  Stuck Live Worship photo-service pid: $pid"
+        ocr_stuck_pids+=("$pid")
+      else
+        echo "  Unrecognized listener pid $pid — inspect manually; it will not be stopped."
+      fi
+    done
+  fi
+fi
 
 echo
 echo "== PHP-FPM stability (segfault check since last restart) =="
@@ -94,6 +131,18 @@ done
 
 echo
 if [[ "$CLEAN" == true ]]; then
+  for pid in "${ocr_stuck_pids[@]:-}"; do
+    [[ -n "$pid" ]] || continue
+    # Recheck ownership before stopping anything, including after the grace period.
+    if is_worship_ocr_pid "$pid"; then
+      echo "Stopping unresponsive Live Worship photo-service pid $pid..."
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 2
+      if is_worship_ocr_pid "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    fi
+  done
   if [[ ${#kill_list[@]} -eq 0 ]]; then
     echo "Nothing to clean on the Vite ports."
   else
@@ -106,15 +155,22 @@ if [[ "$CLEAN" == true ]]; then
     echo "Restarting PHP-FPM to clear crashed workers..."
     brew services restart php >/dev/null 2>&1 && echo "$(green Done.) PHP-FPM restarted."
   fi
-  [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false ]] && echo "$(green Stack is clean.)"
+  [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false && "$ocr_needs_attention" == false ]] && echo "$(green Stack is clean.)"
 else
+  if [[ ${#ocr_stuck_pids[@]} -gt 0 ]]; then
+    echo "Run with --clean to stop the stuck Live Worship photo service."
+  fi
   if [[ ${#kill_list[@]} -gt 0 ]]; then
     echo "Run with --clean to kill the stray/duplicate Vite processes listed above."
   fi
   if [[ "$fpm_needs_restart" == true ]]; then
     echo "Run with --clean to restart PHP-FPM and clear the crashed workers."
   fi
-  if [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false ]]; then
+  if [[ ${#kill_list[@]} -eq 0 && "$fpm_needs_restart" == false && "$ocr_needs_attention" == false ]]; then
     echo "Stack looks clean."
   fi
+fi
+if [[ "$ocr_needs_attention" == true ]]; then
+  echo "Start the photo service with start-mainzworld.sh after resolving any unhealthy listener."
+  echo "Setup details: live-worship/README.md"
 fi

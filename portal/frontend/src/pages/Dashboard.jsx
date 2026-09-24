@@ -16,6 +16,12 @@ export default function Dashboard() {
       description: 'Return to the public MainzWare technology solutions homepage.',
       url: '/',
     },
+    {
+      name: 'Live Worship',
+      description: 'Open the independent worship song catalog and live song controls.',
+      url: '/live-worship/',
+      external: true,
+    },
   ];
 
   return (

@@ -24,6 +24,21 @@ final class Router
     {
         $path = rtrim(parse_url($path, PHP_URL_PATH) ?: '/', '/');
 
+        // Live Worship owns its controllers, schema, and migrations in its own
+        // product folder. This small route bridge keeps the existing portal
+        // login/session transport while leaving app authorization to that API.
+        if ($path === '/api/v1/live-worship' || str_starts_with($path, '/api/v1/live-worship/')) {
+            // The source checkout keeps this API under portal/api, while the
+            // release installs it at the app root. Resolve both layouts.
+            $worshipBootstrap = dirname(__DIR__, 3) . '/live-worship/api/src/bootstrap.php';
+            if (!is_file($worshipBootstrap)) {
+                $worshipBootstrap = dirname(__DIR__, 2) . '/live-worship/api/src/bootstrap.php';
+            }
+            require_once $worshipBootstrap;
+            \LiveWorship\Api::dispatch($method, $path);
+            return;
+        }
+
         if ($method === 'GET' && $path === '/api/v1/projects') {
             (new ProjectsController())->index();
             return;

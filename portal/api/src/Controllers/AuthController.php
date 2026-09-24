@@ -33,6 +33,7 @@ final class AuthController
 
         session_regenerate_id(true);
         $_SESSION['user_id'] = $user['id'];
+        unset($_SESSION['live_worship_account_id'], $_SESSION['live_worship_auth_mode']);
 
         // Web clients use the session cookie; the "token" field is for mobile/API clients
         // that send it back as "Authorization: Bearer <token>".

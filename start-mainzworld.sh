@@ -8,7 +8,8 @@
 # Only `./start-mainzworld.sh` requires your cwd to already be the repo root
 # (a bare `./` is a relative path) — prefer one of the forms above instead.
 #
-# STOP:   just close the VS Code terminal / press Ctrl-C — Vite stops.
+# STOP:   just close the VS Code terminal / press Ctrl-C — Vite and the
+#         app-scoped Live Worship OCR service started by this shell stop.
 #         Apache, PHP-FPM and PostgreSQL are lightweight brew daemons and
 #         are intentionally left running for next time.
 #
@@ -16,6 +17,8 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$ROOT_DIR/portal/frontend"
+WORSHIP_FRONTEND_DIR="$ROOT_DIR/live-worship/frontend"
+WORSHIP_OCR_DIR="$ROOT_DIR/live-worship/ocr"
 
 green() { printf '\033[32m%s\033[0m' "$1"; }
 red()   { printf '\033[31m%s\033[0m' "$1"; }
@@ -61,15 +64,40 @@ if [[ "$api_ready" != true ]]; then
   exit 1
 fi
 
-# 4. Frontend runs in the FOREGROUND: closing this terminal stops it.
+# 4. Run the independent Live Worship frontend behind the portal path.
+cd "$WORSHIP_FRONTEND_DIR"
+./node_modules/.bin/vite --host 0.0.0.0 --port 5174 --strictPort &
+WORSHIP_VITE_PID=$!
+
+# PaddleOCR is isolated to Live Worship and listens on loopback only.
+WORSHIP_OCR_PID=""
+if [[ -x "$WORSHIP_OCR_DIR/.venv/bin/python" ]]; then
+  if curl --silent --fail --max-time 1 http://127.0.0.1:8765/health >/dev/null 2>&1; then
+    echo "Live Worship photo recognition is already running on 127.0.0.1:8765."
+  elif ! port_up 8765; then
+    (cd "$WORSHIP_OCR_DIR" && exec env PADDLE_PDX_CACHE_HOME="$WORSHIP_OCR_DIR/.cache" LIVE_WORSHIP_OCR_HOST=127.0.0.1 "$WORSHIP_OCR_DIR/.venv/bin/python" server.py) &
+    WORSHIP_OCR_PID=$!
+    echo "Starting the Live Worship photo recognition service..."
+  else
+    echo "Port 8765 is in use by another service; Live Worship photo recognition was not started." >&2
+  fi
+else
+  echo "Live Worship photo recognition is not installed. See live-worship/README.md to set up PaddleOCR."
+fi
+
+# 5. Portal frontend runs in the FOREGROUND: closing this terminal also stops
+#    Live Worship's Vite server and this shell's OCR helper.
 cleanup() {
+  kill "$WORSHIP_VITE_PID" 2>/dev/null || true
+  if [[ -n "$WORSHIP_OCR_PID" ]]; then kill "$WORSHIP_OCR_PID" 2>/dev/null || true; fi
   echo
-  echo "Stopping the React dev server (backend daemons stay running)."
+  echo "Stopping the React dev servers and Live Worship photo service (backend daemons stay running)."
 }
 trap cleanup EXIT INT TERM
 
-echo "Starting the React app at http://localhost:5173 ..."
-echo "   (Press Ctrl-C or close this terminal to stop.)"
+echo "Starting the portal at http://localhost:5173 ..."
+echo "Live Worship is available at http://localhost:5173/live-worship/"
+echo "   (Press Ctrl-C or close this terminal to stop both frontends and OCR.)"
 echo
 cd "$FRONTEND_DIR"
-exec npm run dev
+npm run dev

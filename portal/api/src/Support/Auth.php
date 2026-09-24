@@ -12,6 +12,11 @@ final class Auth
 {
     public static function currentUser(): ?array
     {
+        // A Live Worship sign-out only suppresses portal-session reuse inside
+        // that app. Visiting the portal again reactivates its still-valid login.
+        if (($_SESSION['live_worship_auth_mode'] ?? '') === 'signed_out') {
+            unset($_SESSION['live_worship_auth_mode'], $_SESSION['live_worship_account_id']);
+        }
         $userId = $_SESSION['user_id'] ?? self::userIdFromBearerToken();
         if ($userId === null) {
             return null;

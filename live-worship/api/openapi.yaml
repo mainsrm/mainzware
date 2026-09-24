@@ -1,0 +1,185 @@
+openapi: 3.1.0
+info:
+  title: Live Worship API
+  version: 1.0.0
+  description: App-owned song, service, member, and live display API. Musician chord marks store zero-based Unicode character positions in each part's lyrics. Authentication accepts either a MainzWare session or a leader-managed Live Worship account; authorization uses live_worship.members.
+servers:
+  - url: /api/v1/live-worship
+security:
+  - cookieSession: []
+paths:
+  /auth/login:
+    post:
+      summary: Sign in with a leader-managed Live Worship account
+      responses:
+        '200': { description: Signed in }
+        '401': { description: Invalid username or password }
+  /auth/logout:
+    post:
+      summary: Sign out of Live Worship
+      responses: { '200': { description: Signed out of Live Worship } }
+  /auth/password:
+    post:
+      summary: Change the current Live Worship account password
+      responses:
+        '200': { description: Password changed }
+        '400': { description: Current password or new password is invalid }
+  /me:
+    get:
+      summary: Get the current Live Worship member and role
+      responses:
+        '200': { description: Live Worship member }
+        '401': { description: Sign-in required }
+        '403': { description: Not a Live Worship member }
+  /settings:
+    get:
+      summary: Get the instance display name
+      responses: { '200': { description: Instance settings } }
+    put:
+      summary: Rename this Live Worship instance (leader only)
+      responses: { '200': { description: Updated settings } }
+  /settings/logo:
+    post:
+      summary: Upload a team logo (leader only)
+      responses: { '200': { description: Updated branding settings } }
+    delete:
+      summary: Remove the team logo (leader only)
+      responses: { '200': { description: Updated branding settings } }
+  /branding/logo:
+    get:
+      summary: Read the private team logo
+      responses: { '200': { description: Logo image } }
+  /storage:
+    get:
+      summary: Get stored song page count and byte totals (leader only)
+      responses: { '200': { description: Usage totals } }
+  /members:
+    get:
+      summary: List app members and roles (leader only)
+      responses: { '200': { description: Member list } }
+    post:
+      summary: Add an active MainzWare account to the app (leader only)
+      responses: { '201': { description: Member added } }
+  /songs:
+    get:
+      summary: List songs
+      responses: { '200': { description: Song catalog } }
+    post:
+      summary: Create a song (leader only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SongInput' }
+      responses: { '201': { description: Song created } }
+  /songs/ocr:
+    post:
+      summary: Recognize a song page with the private Live Worship PaddleOCR service (leader only)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary, description: JPEG, PNG, or WebP page image up to 16 MiB }
+      responses:
+        '200':
+          description: Recognized text regions, in reading order
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text: { type: string }
+                        confidence: { type: number }
+                        box:
+                          type: array
+                          items: { type: number }
+                          minItems: 4
+                          maxItems: 4
+        '400': { description: Invalid image }
+        '403': { description: Leader role required }
+        '503': { description: Private OCR service unavailable }
+  /songs/{songId}:
+    get:
+      summary: Read a song and its ordered page references
+      responses: { '200': { description: Song } }
+    put:
+      summary: Edit a song (leader only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SongInput' }
+      responses: { '200': { description: Song updated } }
+    delete:
+      summary: Delete a song and its page files (leader only)
+      responses: { '200': { description: Song removed } }
+  /songs/{songId}/pages:
+    post:
+      summary: Append ordered JPEG, PNG, or WebP pages to a song (leader only)
+      responses: { '201': { description: Stored page records, including sizes } }
+  /song-pages/{pageId}:
+    get:
+      summary: Read a private uploaded page image
+      responses: { '200': { description: Image content } }
+  /setlists:
+    get:
+      summary: List active setlists, or pass status=archived
+      responses: { '200': { description: Setlists with songs in service order } }
+    post:
+      summary: Create a service setlist (leader only)
+      responses: { '201': { description: Setlist created } }
+  /setlists/{setlistId}/state:
+    get:
+      summary: Read the live song and section selection
+      responses: { '200': { description: Live display state } }
+    put:
+      summary: Select a song part for all choir and musician displays (leader only)
+      responses: { '200': { description: Updated live state and revision } }
+  /live:
+    get:
+      summary: Get the currently active service and its live state
+      responses: { '200': { description: Current service, or null } }
+components:
+  schemas:
+    SongInput:
+      type: object
+      required: [title, sections]
+      properties:
+        title: { type: string, maxLength: 200 }
+        writer: { type: string }
+        default_key: { type: string }
+        ocr_text: { type: string }
+        sections:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [name, lyrics]
+            properties:
+              id: { type: string }
+              name: { type: string, maxLength: 80 }
+              lyrics: { type: string }
+              chords: { type: string, description: Unpositioned chord text retained for OCR review and older records. }
+              chord_marks:
+                type: array
+                description: Chords anchored at zero-based Unicode character positions in lyrics.
+                items:
+                  type: object
+                  required: [at, chord]
+                  properties:
+                    at: { type: integer, minimum: 0 }
+                    chord: { type: string, maxLength: 16 }
+  securitySchemes:
+    cookieSession:
+      type: apiKey
+      in: cookie
+      name: PHPSESSID
