@@ -92,6 +92,35 @@ development does not leave a stalled process holding port 8765. If photo import
 fails locally, check `curl --max-time 5 http://127.0.0.1:8765/health`; an open port
 alone does not mean the service is responding.
 
+## Importing the worship song repository
+
+The app includes a repeatable command-line importer for the licensed
+[mattgraham/worship](https://github.com/mattgraham/worship) repository. Keep the
+repository as a separate local clone; the importer records the repository URL,
+relative source path, and SHA-256 for every imported song. It does not execute
+or copy repository files into the application.
+
+After running migrations, clone the repository and preview the import:
+
+```sh
+git clone https://github.com/mattgraham/worship.git import-sources/worship
+php api/bin/migrate.php
+php api/bin/import-onsong.php import-sources/worship --member-id=LEADER_ID --limit=10
+```
+
+Review the preview, then import the catalog with `--commit`. Existing catalog
+titles are skipped by default. Re-running the command skips files already
+imported from the same source path; use `--update` when intentionally replacing
+those records. Use `--allow-duplicates` only when duplicate titles are wanted.
+The importer accepts `.onsong` files recursively and converts inline bracketed
+chords into the positioned `chord_marks` used by musician view.
+
+To test parsing without a database write:
+
+```sh
+php api/tests/onsong.php
+```
+
 ## Database and first leader
 
 With the portal API environment loaded, run:
@@ -109,3 +138,17 @@ accounts or Live Worship-only accounts and assign `leader`, `choir`, or
 `php api/bin/migrate.php`; do not add them to the portal migration runner.
 Deployment runs the app-owned migration runner. User uploads are excluded from
 releases and retained in the storage directory across updates.
+
+## Saved song keys
+
+Leaders can use **Transpose to** on a song to immediately save its new key and
+transposed chords for the catalog, set lists, and live followers. The original
+key is preserved and shown beside the current key. In the song editor, changing
+the key transposes the submitted chords when **Save** is pressed. Songs without
+a known key keep their chords when a key is first assigned. Uploaded page images
+remain in their original key.
+
+Migration `005_song_original_key.sql` adds the original key and backfills existing
+songs from their current key. Run the app-owned migration runner before serving
+the updated API. To check chord transposition, run
+`php api/tests/transpose.php` from `live-worship/`.

@@ -10,10 +10,13 @@
   border-bottom: 2px solid #0f1c2e;
   overflow: hidden;
   box-sizing: border-box;
+  /* Keep the middle 80% of the 2172×724 source image; crop 10% from each edge. */
+  aspect-ratio: 2172 / 579;
 }
 
 .hero-header__picture {
   display: block;
+  height: 100%;
   width: 100%;
   max-width: 2172px;
   margin: 0 auto;
@@ -22,10 +25,22 @@
 .hero-header__img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
   max-width: 100%;
-  object-fit: contain;
-  aspect-ratio: 2172 / 724;
+  object-fit: cover;
+  object-position: center center;
+  aspect-ratio: auto;
+}
+
+@media (max-width: 768px) {
+  .hero-header {
+    /* Mobile keeps the middle 80% of the source image. */
+    aspect-ratio: 2172 / 579;
+  }
+
+  .hero-header__img {
+    object-position: center center;
+  }
 }
 
 /* Fallback / utility definition for screen-reader-only accessible heading */

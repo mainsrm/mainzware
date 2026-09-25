@@ -22,7 +22,16 @@ import MenuItem from '@mui/material/MenuItem';
 import Typography from '@mui/material/Typography';
 import apiClient from '../api/client';
 
-export default function TransactionTable({ transactions, categories, canWrite, onChanged, ariaLabel = 'Budget transactions' }) {
+const compactCellSx = {
+  px: { xs: 0.5, sm: 2 },
+  py: { xs: 0.75, sm: 1.5 },
+  fontSize: { xs: '0.72rem', sm: '0.875rem' },
+  overflowWrap: 'anywhere',
+  whiteSpace: 'normal',
+  '& .MuiTableSortLabel-root': { whiteSpace: 'normal', lineHeight: 1.1 },
+};
+
+export default function TransactionTable({ transactions, categories, canWrite, onChanged, ariaLabel = 'Budget transactions', headerLabels = {} }) {
   const [transactionSearch, setTransactionSearch] = useState('');
   const [editingTransaction, setEditingTransaction] = useState(null);
   const [editingField, setEditingField] = useState('category');
@@ -68,7 +77,7 @@ export default function TransactionTable({ transactions, categories, canWrite, o
   };
 
   const sortableHeader = (label, column, align = 'left') => (
-    <TableCell align={align} sortDirection={sortColumn === column ? sortDirection : false}>
+    <TableCell align={align} sortDirection={sortColumn === column ? sortDirection : false} sx={compactCellSx}>
       <TableSortLabel
         active={sortColumn === column}
         aria-label={`Sort by ${label}${sortColumn === column ? `. Currently ${sortDirection}ending` : ''}`}
@@ -145,53 +154,55 @@ export default function TransactionTable({ transactions, categories, canWrite, o
       <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700 }}>
         Total: ${filteredTotal.toFixed(2)} ({filteredTransactions.length} transaction{filteredTransactions.length === 1 ? '' : 's'})
       </Typography>
-      <TableContainer component={Paper}>
-        <Table stickyHeader aria-label={ariaLabel}>
+      <TableContainer component={Paper} sx={{ overflowX: 'hidden' }}>
+        <Table stickyHeader size="small" aria-label={ariaLabel} sx={{ tableLayout: 'fixed', width: '100%' }}>
           <TableHead>
             <TableRow>
               {sortableHeader('Date', 'transaction_date')}
-              {sortableHeader('Description', 'description')}
-              {sortableHeader('Amount', 'amount', 'right')}
-              {sortableHeader('Budget category', 'budget_category')}
-              {sortableHeader('Subcategory', 'subcategory')}
-              {sortableHeader('Account', 'account')}
+              {sortableHeader(headerLabels.description || 'Description', 'description')}
+              {sortableHeader(headerLabels.amount || 'Amount', 'amount', 'right')}
+              {sortableHeader(headerLabels.budget_category || 'Budget category', 'budget_category')}
+              {sortableHeader(headerLabels.subcategory || 'Subcategory', 'subcategory')}
+              {sortableHeader(headerLabels.account || 'Account', 'account')}
             </TableRow>
           </TableHead>
           <TableBody>
             {filteredTransactions.map((transaction) => (
               <TableRow key={transaction.id}>
-                <TableCell>{transaction.transaction_date}</TableCell>
-                <TableCell>{transaction.description}</TableCell>
-                <TableCell align="right">${Number(transaction.amount).toFixed(2)}</TableCell>
-                <TableCell>
+                <TableCell sx={compactCellSx}>{transaction.transaction_date}</TableCell>
+                <TableCell sx={compactCellSx}>{transaction.description}</TableCell>
+                <TableCell align="right" sx={compactCellSx}>${Number(transaction.amount).toFixed(2)}</TableCell>
+                <TableCell sx={compactCellSx}>
                   {parentCategoryFor(transaction) || (
                     <Chip
                       label={transaction.budget_category || transaction.category || 'Uncategorized'}
                       size="small"
                       clickable={canWrite}
                       onClick={canWrite ? () => editCategory(transaction, 'category') : undefined}
+                      sx={{ maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', overflowWrap: 'anywhere' } }}
                     />
                   )}
                 </TableCell>
-                <TableCell>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                <TableCell sx={compactCellSx}>
+                  <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
                     <Chip
                       label={parentCategoryFor(transaction) ? transaction.budget_category || transaction.category : 'None'}
                       size="small"
                       clickable={canWrite}
                       onClick={canWrite ? () => editCategory(transaction, 'subcategory') : undefined}
+                      sx={{ maxWidth: '100%', '& .MuiChip-label': { whiteSpace: 'normal', overflowWrap: 'anywhere' } }}
                     />
                     {transaction.category_confidence !== null && Number(transaction.category_confidence) < 0.6 && (
                       <Chip label="Review" size="small" color="warning" variant="outlined" />
                     )}
                   </Stack>
                 </TableCell>
-                <TableCell>{transaction.account || '-'}</TableCell>
+                <TableCell sx={compactCellSx}>{transaction.account || '-'}</TableCell>
               </TableRow>
             ))}
             {filteredTransactions.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6} align="center">No transactions match that search.</TableCell>
+                <TableCell colSpan={6} align="center" sx={compactCellSx}>No transactions match that search.</TableCell>
               </TableRow>
             )}
           </TableBody>

@@ -17,14 +17,13 @@ import ListItemText from '@mui/material/ListItemText';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import useTheme from '@mui/material/styles/useTheme';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { navigationFor } from '../navigation';
 
-// Below 'md' (900px) the nav collapses into a drawer instead of horizontally-scrollable Tabs,
-// so landscape phones and small tablets get the drawer rather than a scroll strip.
-const NAV_BREAKPOINT = 'md';
+// Below 1000px the nav collapses into a drawer before the labels can wrap.
+const NAV_DESKTOP_QUERY = '(min-width: 1000px)';
+const NAV_DESKTOP_MEDIA = '@media (min-width: 1000px)';
 
 export default function NavBar() {
   const [accountMenuAnchor, setAccountMenuAnchor] = useState(null);
@@ -33,9 +32,11 @@ export default function NavBar() {
   const navigate = useNavigate();
   const { user, status, logout } = useAuth();
   const links = navigationFor(user);
-  const currentValue = links.some((link) => link.to === pathname) ? pathname : false;
-  const theme = useTheme();
-  const isTabletOrWider = useMediaQuery(theme.breakpoints.up(NAV_BREAKPOINT));
+  const headerLinks = [...links.filter((link) => link.label !== 'Users'), ...links.filter((link) => link.label === 'Users')];
+  const drawerLinks = [...links.filter((link) => link.label !== 'Users'), ...links.filter((link) => link.label === 'Users')];
+  const activeLink = links.find((link) => link.to === pathname || (link.to === '/budget' && pathname.startsWith('/budget/')));
+  const currentValue = activeLink?.to || false;
+  const isTabletOrWider = useMediaQuery(NAV_DESKTOP_QUERY);
 
   useEffect(() => {
     if (isTabletOrWider) {
@@ -49,8 +50,23 @@ export default function NavBar() {
   };
 
   return (
-    <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
-      <Box sx={{ display: { xs: 'flex', [NAV_BREAKPOINT]: 'none' }, alignItems: 'center' }}>
+    <Box
+      component="header"
+      sx={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: { xs: 0.75, sm: 1.5 },
+        width: '100%',
+        px: { xs: 1, sm: 2, md: 3 },
+        py: { xs: 1, sm: 0.75 },
+        bgcolor: 'background.paper',
+        borderBottom: '1px solid',
+        borderColor: 'divider',
+      }}
+    >
+      <Box sx={{ display: 'flex', [NAV_DESKTOP_MEDIA]: { display: 'none' }, alignItems: 'center' }}>
         <Button
           aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
           aria-controls="main-nav-drawer"
@@ -61,7 +77,8 @@ export default function NavBar() {
           onClick={() => setMobileNavOpen((open) => !open)}
           size="small"
           sx={{
-            display: { xs: 'inline-flex', [NAV_BREAKPOINT]: 'none' },
+            display: 'inline-flex',
+            [NAV_DESKTOP_MEDIA]: { display: 'none' },
             border: '1px solid',
             borderColor: 'divider',
             borderRadius: 2,
@@ -74,15 +91,16 @@ export default function NavBar() {
         </Button>
       </Box>
 
-      <Box component="nav" sx={{ display: { xs: 'none', [NAV_BREAKPOINT]: 'flex' }, flex: '1 1 auto', minWidth: 0, alignItems: 'center' }}>
-        <Tabs value={currentValue} variant="scrollable" aria-label="Mainz World navigation">
-          {links.map((link) => (
+      <Box component="nav" aria-label="MainzWare navigation" sx={{ display: 'none', [NAV_DESKTOP_MEDIA]: { display: 'flex' }, flex: '1 1 auto', minWidth: 0, alignItems: 'center', justifyContent: 'center' }}>
+        <Tabs value={currentValue} variant="standard" aria-label="Mainz World navigation" sx={{ minHeight: 48, whiteSpace: 'nowrap', '& .MuiTabs-flexContainer': { flexWrap: 'nowrap' }, '& .MuiTabs-scroller': { overflow: 'hidden' } }}>
+          {headerLinks.filter((link) => link.label !== 'Users').map((link) => (
+            <Tab key={link.to} label={link.label} value={link.to} component={NavLink} to={link.to} />
+          ))}
+          <Tab label="Live Worship" value="/live-worship" component="a" href="/live-worship/" />
+          {headerLinks.filter((link) => link.label === 'Users').map((link) => (
             <Tab key={link.to} label={link.label} value={link.to} component={NavLink} to={link.to} />
           ))}
         </Tabs>
-        <Button component={NavLink} to="/" size="small" sx={{ ml: 1, textTransform: 'none' }}>
-          Homepage
-        </Button>
       </Box>
 
       <Drawer
@@ -100,15 +118,15 @@ export default function NavBar() {
       >
         <Box id="main-nav-drawer" role="dialog" aria-label="Main navigation" sx={{ p: 2 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-            <Typography component="h2" variant="subtitle1" sx={{ fontWeight: 700 }}>
-              Mainz World
+            <Typography component={NavLink} to="/" variant="subtitle1" onClick={() => setMobileNavOpen(false)} sx={{ fontWeight: 700, color: 'inherit', textDecoration: 'none' }}>
+              MainzWare
             </Typography>
             <IconButton aria-label="Close navigation menu" onClick={() => setMobileNavOpen(false)} size="small">
               <CloseRoundedIcon fontSize="small" />
             </IconButton>
           </Stack>
           <List disablePadding sx={{ display: 'grid', gap: 0.5 }}>
-            {links.map((link) => (
+            {drawerLinks.map((link) => (
               <ListItemButton
                 key={link.to}
                 selected={pathname === link.to}
@@ -116,6 +134,7 @@ export default function NavBar() {
                 sx={{
                   borderRadius: 2,
                   minHeight: 44,
+                  order: link.label === 'Users' ? 2 : 1,
                   '&.Mui-selected': {
                     bgcolor: 'primary.main',
                     color: 'primary.contrastText',
@@ -128,15 +147,16 @@ export default function NavBar() {
                 <ListItemText primary={link.label} primaryTypographyProps={{ fontWeight: pathname === link.to ? 700 : 500 }} />
               </ListItemButton>
             ))}
-            <ListItemButton component={NavLink} to="/" onClick={() => setMobileNavOpen(false)} sx={{ borderRadius: 2, minHeight: 44 }}>
-              <ListItemText primary="Homepage" />
+            <ListItemButton component="a" href="/live-worship/" onClick={() => setMobileNavOpen(false)} sx={{ borderRadius: 2, minHeight: 44, order: 1 }}>
+              <ListItemText primary="Live Worship" />
             </ListItemButton>
           </List>
         </Box>
       </Drawer>
 
       {status === 'ready' && (
-        <Box sx={{ px: { xs: 0, md: 2 }, ml: 'auto' }}>
+        <Box sx={{ flex: '1 1 auto', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'nowrap', gap: 1, minWidth: 0, px: { xs: 0, md: 1 }, pt: 0, borderTop: 'none', borderColor: 'divider', [NAV_DESKTOP_MEDIA]: { flex: '0 0 100%', justifyContent: 'space-between', pt: 0.5, borderTop: '1px solid' } }}>
+          <Button component={NavLink} to="/" size="small" sx={{ textTransform: 'none' }}>Homepage</Button>
           {user ? (
             <>
               <Button
@@ -147,7 +167,7 @@ export default function NavBar() {
                 onClick={(event) => setAccountMenuAnchor(event.currentTarget)}
                 size="small"
               >
-                {user.username}
+                <Box component="span" sx={{ maxWidth: { xs: 130, sm: 220 }, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.username}</Box>
               </Button>
               <Menu
                 anchorEl={accountMenuAnchor}

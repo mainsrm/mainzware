@@ -16,3 +16,4 @@ mechanism worth remembering.
 
 - [`db-migrations.md`](db-migrations.md) — how schema changes are tracked and applied
 - [`property-scraper-schedule.md`](property-scraper-schedule.md) — how and when the property scraper runs
+- [`live-worship-onsong-import.md`](live-worship-onsong-import.md) — where the licensed song source is kept and how to import it

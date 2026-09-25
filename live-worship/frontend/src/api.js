@@ -21,11 +21,29 @@ export function send(method, payload) {
 }
 
 export function normalizeSong(song) {
+  const rawSections = song.sections || [];
+  const baseName = (name) => String(name || '')
+    .replace(/\s*\((?:\d+\s*x|x\s*\d+)\)\s*$/i, '')
+    .replace(/\s+\d+(?=\s|$)/, '')
+    .trim();
+  const counts = rawSections.reduce((result, section) => {
+    const base = baseName(section.name);
+    const key = base.toLocaleLowerCase();
+    result[key] = (result[key] || 0) + 1;
+    return result;
+  }, {});
+  const seen = {};
+  const sections = rawSections.map((section) => {
+    const base = baseName(section.name) || section.name;
+    const key = String(base).toLocaleLowerCase();
+    seen[key] = (seen[key] || 0) + 1;
+    return { ...section, name: counts[key] > 1 ? `${base} ${seen[key]}` : base };
+  });
   return {
     ...song,
     id: String(song.id),
     key: song.default_key || '',
-    parts: song.sections || [],
+    parts: sections,
     pages: (song.pages || []).map((page) => ({ ...page, name: `Page ${page.number}`, image: page.url })),
     updated: song.updated_at ? new Date(song.updated_at).toLocaleDateString() : '',
   };

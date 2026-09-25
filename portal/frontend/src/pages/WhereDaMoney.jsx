@@ -18,6 +18,15 @@ import MenuItem from '@mui/material/MenuItem';
 import { useSearchParams } from 'react-router-dom';
 import TransactionTable from '../components/TransactionTable';
 
+const compactCellSx = {
+  px: { xs: 0.5, sm: 2 },
+  py: { xs: 0.75, sm: 1.5 },
+  fontSize: { xs: '0.75rem', sm: '0.875rem' },
+  overflowWrap: 'anywhere',
+  whiteSpace: 'normal',
+  '& .MuiTableSortLabel-root': { whiteSpace: 'normal', lineHeight: 1.1 },
+};
+
 export default function WhereDaMoney() {
   const [searchParams] = useSearchParams();
   const [budgets, setBudgets] = useState([]);
@@ -93,7 +102,7 @@ export default function WhereDaMoney() {
     }
   };
   const sortableCategoryHeader = (label, column, align = 'left') => (
-    <TableCell align={align} sortDirection={categorySort === column ? categorySortDirection : false}>
+    <TableCell align={align} sortDirection={categorySort === column ? categorySortDirection : false} sx={compactCellSx}>
       <TableSortLabel active={categorySort === column} aria-label={`Sort by ${label}${categorySort === column ? `. Currently ${categorySortDirection}ending` : ''}`} direction={categorySort === column ? categorySortDirection : 'asc'} onClick={() => requestCategorySort(column)}>
         {label}
       </TableSortLabel>
@@ -162,8 +171,8 @@ export default function WhereDaMoney() {
       )}
 
       {!selectedCategory && categoryTotals.length > 0 && (
-        <TableContainer component={Paper} sx={{ mb: 3 }}>
-          <Table stickyHeader aria-label="Spending by category">
+        <TableContainer component={Paper} sx={{ mb: 3, overflowX: 'hidden' }}>
+          <Table stickyHeader size="small" aria-label="Spending by category" sx={{ tableLayout: 'fixed', width: '100%' }}>
             <TableHead>
               <TableRow>
                 {sortableCategoryHeader('Category', 'category')}
@@ -179,11 +188,11 @@ export default function WhereDaMoney() {
                   onClick={() => setSelectedCategory(row.category)}
                   sx={{ cursor: 'pointer' }}
                 >
-                  <TableCell>
-                    <Button variant="text">{row.category}</Button>
+                  <TableCell sx={compactCellSx}>
+                    <Button variant="text" sx={{ minWidth: 0, p: 0, textAlign: 'left', justifyContent: 'flex-start', whiteSpace: 'normal', overflowWrap: 'anywhere' }}>{row.category}</Button>
                   </TableCell>
-                  <TableCell align="right">${Number(row.actual_spent).toFixed(2)}</TableCell>
-                  <TableCell align="right">
+                  <TableCell align="right" sx={compactCellSx}>${Number(row.actual_spent).toFixed(2)}</TableCell>
+                  <TableCell align="right" sx={compactCellSx}>
                     {transactions.filter((transaction) => transaction.budget_category === row.category).length}
                   </TableCell>
                 </TableRow>
@@ -199,6 +208,7 @@ export default function WhereDaMoney() {
           categories={categories}
           canWrite={canWrite}
           ariaLabel="Spending transactions"
+          headerLabels={{ description: 'Desc', amount: 'Amt', budget_category: 'Category' }}
           onChanged={async () => {
             const [transactionsResponse, categoriesResponse, summaryResponse] = await Promise.all([
               apiClient.get('/budget/transactions', { params: { budget_id: budgetId } }),

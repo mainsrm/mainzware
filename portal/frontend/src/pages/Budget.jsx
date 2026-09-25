@@ -21,7 +21,10 @@ import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import Chip from '@mui/material/Chip';
-import Paper from '@mui/material/Paper';
+import Accordion from '@mui/material/Accordion';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 export default function Budget() {
   const { user } = useAuth();
@@ -516,10 +519,13 @@ export default function Budget() {
         </Box>
       </Dialog>
 
-      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
-        <Typography variant="subtitle1" component="h3" gutterBottom>
-          Import & manage data
-        </Typography>
+      <Accordion variant="outlined" disableGutters sx={{ mb: 3, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} aria-controls="import-manage-data-panel" id="import-manage-data-header">
+          <Typography variant="subtitle1" component="h3">
+            Import & manage data
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails id="import-manage-data-panel" sx={{ pt: 0 }}>
         {user && canWrite ? (
           budgetId && (
             <>
@@ -588,10 +594,11 @@ export default function Budget() {
           <Alert severity="info">This budget is view-only. Ask the owner for editor access to import transactions.</Alert>
         ) : (
           <Alert severity="info">
-            <RouterLink to="/login" state={{ from: '/what-da-money' }}>Log in</RouterLink> to import transactions.
+            <RouterLink to="/login" state={{ from: '/budget/what-da-money' }}>Log in</RouterLink> to import transactions.
           </Alert>
         )}
-      </Paper>
+        </AccordionDetails>
+      </Accordion>
 
       {uploadMessage && <Alert severity={uploadMessage.severity} sx={{ mb: 2 }}>{uploadMessage.text}</Alert>}
 

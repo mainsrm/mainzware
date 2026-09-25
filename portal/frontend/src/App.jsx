@@ -10,6 +10,8 @@ import Snowball from './pages/Snowball';
 import Login from './pages/Login';
 import Users from './pages/Users';
 import Profile from './pages/Profile';
+import TechnicalAnalysis from './pages/TechnicalAnalysis';
+import BudgetApp from './pages/BudgetApp';
 import RequireAuth from './components/RequireAuth';
 
 export default function App() {
@@ -22,9 +24,13 @@ export default function App() {
           {/* Old dashboard URL kept as a redirect so existing bookmarks/links keep working. */}
           <Route path="/mainz-world" element={<Navigate to="/portal" replace />} />
           <Route path="/properties" element={<RequireAuth><Properties /></RequireAuth>} />
-          <Route path="/what-da-money" element={<RequireAuth><Budget /></RequireAuth>} />
-          <Route path="/where-da-money" element={<RequireAuth><WhereDaMoney /></RequireAuth>} />
-          <Route path="/snowball" element={<RequireAuth><Snowball /></RequireAuth>} />
+          <Route path="/budget" element={<RequireAuth><BudgetApp /></RequireAuth>}>
+            <Route index element={<Navigate to="what-da-money" replace />} />
+            <Route path="what-da-money" element={<Budget />} />
+            <Route path="where-da-money" element={<WhereDaMoney />} />
+            <Route path="snowball" element={<Snowball />} />
+          </Route>
+          <Route path="/technical-analysis" element={<RequireAuth><TechnicalAnalysis /></RequireAuth>} />
           <Route path="/login" element={<Login />} />
           <Route path="/profile" element={<RequireAuth><Profile /></RequireAuth>} />
           <Route

@@ -3,6 +3,10 @@ import { Archive, ArrowDown, ArrowUp, AudioLines, Calendar, ChevronDown, Chevron
 import { normalizeSetlist, normalizeSong, request, send } from './api';
 
 const WHOLE_SONG = 'whole-song';
+const MAJOR_KEYS = ['C', 'C♯', 'D♭', 'D', 'D♯', 'E♭', 'E', 'F', 'F♯', 'G♭', 'G', 'G♯', 'A♭', 'A', 'A♯', 'B♭', 'B'];
+const MUSICAL_KEYS = [...MAJOR_KEYS, ...MAJOR_KEYS.map((key) => `${key}m`)];
+const MAINZWARE_MARK_LIGHT = `${import.meta.env.BASE_URL}img/mainzware-m-light.png`;
+const MAINZWARE_MARK_DARK = `${import.meta.env.BASE_URL}img/mainzware-m-dark.png`;
 
 export default function App() {
   const [authStatus, setAuthStatus] = useState('checking');
@@ -13,13 +17,18 @@ export default function App() {
   const [view, setView] = useState('home');
   const [query, setQuery] = useState('');
   const [song, setSong] = useState(null);
+  const [savingKey, setSavingKey] = useState(false);
+  const keySavePending = useRef(false);
   const [viewingSetlist, setViewingSetlist] = useState(null);
   const [songReturnView, setSongReturnView] = useState('home');
   const [partId, setPartId] = useState('');
+  const [highlightedPartId, setHighlightedPartId] = useState(null);
   const [role, setRole] = useState('choir');
   const [username, setUsername] = useState('');
   const [authType, setAuthType] = useState('mainzware');
   const [mode, setMode] = useState('choir');
+  const [savingMode, setSavingMode] = useState(false);
+  const modeSavePending = useRef(false);
   const [modal, setModal] = useState('');
   const [draft, setDraft] = useState(null);
   const [selectedSetlistSongIds, setSelectedSetlistSongIds] = useState([]);
@@ -38,6 +47,7 @@ export default function App() {
   const [storage, setStorage] = useState({ page_count: 0, total_bytes: 0, total_megabytes: 0 });
   const [members, setMembers] = useState([]);
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const accessReturnView = useRef('home');
   const [settingsError, setSettingsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [connectionError, setConnectionError] = useState('');
@@ -56,6 +66,9 @@ export default function App() {
   const liveRevision = useRef(0);
   const filesRef = useRef(null);
   const profileMenuRef = useRef(null);
+  const songTopRef = useRef(null);
+  const songPartRefs = useRef({});
+  const livePollInitialized = useRef(false);
 
   useEffect(() => {
     document.title = brand;
@@ -119,13 +132,21 @@ export default function App() {
         const state = await request('/live');
         if (!state) { setCurrentSetlistId(null); return; }
         setCurrentSetlistId(String(state.setlist_id));
-        if (state.revision === liveRevision.current) return;
-        liveRevision.current = state.revision;
-        if (!state.song_id) return;
-        const selected = songs.find((item) => item.id === String(state.song_id));
+        const revision = String(state.revision ?? '');
+        if (!livePollInitialized.current) {
+          livePollInitialized.current = true;
+          liveRevision.current = revision;
+          return;
+        }
+        if (revision === String(liveRevision.current)) return;
+        if (!state.song_id) { liveRevision.current = revision; return; }
+        const selected = normalizeSong(await request(`/songs/${state.song_id}`));
+        liveRevision.current = revision;
+        setSongs((current) => current.map((item) => item.id === selected.id ? selected : item));
         if (selected) {
           setSong(selected); setView('song');
           setPartId(state.section_id || WHOLE_SONG);
+          setHighlightedPartId(state.section_id || null);
         }
       } catch { /* transient polling errors do not interrupt song display */ }
     };
@@ -135,6 +156,10 @@ export default function App() {
   }, [authStatus, songs]);
 
   const filtered = useMemo(() => songs.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()) || (item.writer || '').toLowerCase().includes(query.toLowerCase())), [songs, query]);
+  const sortedMembers = useMemo(() => {
+    const roleOrder = { leader: 0, choir: 1, musician: 2 };
+    return members.filter((member) => member.active).sort((a, b) => (roleOrder[a.role] ?? 9) - (roleOrder[b.role] ?? 9) || String(a.username || '').localeCompare(String(b.username || '')));
+  }, [members]);
   const filteredSetlistSongs = useMemo(() => {
     const search = setlistSongQuery.trim().toLowerCase();
     if (!search) return songs;
@@ -144,24 +169,35 @@ export default function App() {
   const homeServices = [...activeSetlists].sort((a, b) => Number(Boolean(b.current)) - Number(Boolean(a.current)) || new Date(a.serviceAt) - new Date(b.serviceAt)).slice(0, 2);
   const archivedSetlists = setlists.filter((item) => item.archived);
   const showWholeSong = partId === WHOLE_SONG;
-  const activePart = showWholeSong ? null : song?.parts?.find((part) => part.id === partId) || song?.parts?.[0];
   const currentSetlist = setlists.find((item) => item.id === currentSetlistId);
   const currentSongIndex = currentSetlist ? currentSetlist.songIds.indexOf(song?.id) : -1;
   const roleLabel = role === 'leader' ? 'Worship leader' : role === 'choir' ? 'Choir member' : 'Musician';
   const usernameInitial = username.trim().charAt(0).toUpperCase() || 'U';
 
+  useEffect(() => {
+    if (view !== 'song' || !song) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      const target = showWholeSong
+        ? songPartRefs.current[song.parts?.[0]?.id] || songTopRef.current
+        : songPartRefs.current[partId];
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [view, song?.id, partId, showWholeSong]);
+
   async function refreshApp() {
     const [me, settings, songRows, activeRows, archivedRows, live] = await Promise.all([
       request('/me'), request('/settings'), request('/songs'), request('/setlists'), request('/setlists?status=archived'), request('/live'),
     ]);
-    setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); setMode(me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
+    setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); setMode(me.role === 'leader' ? (me.view_mode || 'choir') : me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
     const normalizedSongs = songRows.map(normalizeSong);
     setSongs(normalizedSongs); setSetlists([...activeRows, ...archivedRows].map(normalizeSetlist));
     setCurrentSetlistId(live ? String(live.setlist_id) : null);
-    liveRevision.current = live?.revision || 0;
+    liveRevision.current = String(live?.revision ?? 0);
+    livePollInitialized.current = Boolean(live);
     if (live?.song_id) {
       const currentSong = normalizedSongs.find((item) => item.id === String(live.song_id));
-      if (currentSong) { setSong(currentSong); setPartId(live.section_id || WHOLE_SONG); }
+      if (currentSong) { setSong(currentSong); setPartId(live.section_id || WHOLE_SONG); setHighlightedPartId(null); }
     }
     setConnectionError(''); setAuthStatus('ready');
   }
@@ -173,6 +209,16 @@ export default function App() {
     setModal('settings');
     try { await refreshSettings(); }
     catch (error) { setSettingsError(error.message || 'Please try again.'); }
+    finally { setSettingsLoading(false); }
+  }
+
+  async function openManageAccess() {
+    if (role !== 'leader') return;
+    if (view !== 'access') accessReturnView.current = view;
+    setModal(''); setView('access'); setSettingsError(''); setSettingsLoading(true);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    try { setMembers(await request('/members')); }
+    catch (error) { setSettingsError(error.message || 'Could not load team access.'); }
     finally { setSettingsLoading(false); }
   }
 
@@ -200,21 +246,21 @@ export default function App() {
     } catch (error) { showNotice(error.message || 'Could not load the song catalog'); }
   }
   function returnFromSong() { setView(songReturnView === 'song' ? 'home' : songReturnView); setSong(null); }
-  function openSong(item, fromView = view) { if (fromView !== 'song') setSongReturnView(fromView); setSong(item); setPartId(WHOLE_SONG); setView('song'); }
+  function openSong(item, fromView = view) { if (fromView !== 'song') setSongReturnView(fromView); setSong(item); setPartId(WHOLE_SONG); setHighlightedPartId(null); setView('song'); }
   function newSong() {
     const parts = [{ id: crypto.randomUUID(), name: 'Verse 1', lyrics: '', chords: '', chord_marks: [] }];
     setDraft({ id: '', title: '', writer: '', key: '', parts, pages: [], ocrText: '' });
-    setImportMethodsOpen(false); setSongStep('review'); setSongSource('manual'); setSongEditorMode('sections'); setChordProDraft(serializeChordPro(parts));
+    setImportMethodsOpen(false); setSongStep('import'); setSongSource('manual'); setSongEditorMode('sections'); setChordProDraft(serializeChordPro(parts));
     setPastedChartText(''); setOcrStatus('idle'); setModal('song');
   }
   function editSong(item) {
     const parts = item.parts.map((part) => ({ ...part, lyrics: normalizeWhitespaceEntities(part.lyrics), chord_marks: part.chord_marks || [] }));
     setDraft({ ...item, parts, removedPageIds: [], pages: item.pages.map((page) => ({ ...page, pending: false })) });
-    setImportMethodsOpen(false); setSongStep('review'); setSongSource('edit'); setSongEditorMode('chordpro'); setChordProDraft(serializeChordPro(parts));
+    setImportMethodsOpen(false); setSongStep('review'); setSongSource('edit'); setSongEditorMode('sections'); setChordProDraft(serializeChordPro(parts));
     setPastedChartText(''); setOcrStatus('idle'); setModal('song');
   }
   function chooseSongEntry(source) {
-    setSongSource(source); setSongStep(source === 'photo' ? 'photos' : 'review');
+    setSongSource(source); setSongStep(source === 'photo' ? 'photos' : draft?.id ? 'review' : 'import');
     setImportMethodsOpen(false);
     changeSongEditorMode('sections');
   }
@@ -230,6 +276,32 @@ export default function App() {
     const parts = parsed.parts.length ? parsed.parts : [{ id: crypto.randomUUID(), name: 'Verse 1', lyrics: '', chords: '', chord_marks: [] }];
     setDraft((current) => ({ ...current, parts, title: current.title || parsed.title, writer: current.writer || parsed.writer, key: current.key || parsed.key }));
     setSongEditorMode('sections');
+  }
+  async function changeViewMode(nextMode) {
+    if (role !== 'leader' || nextMode === mode || modeSavePending.current) return;
+    modeSavePending.current = true;
+    setSavingMode(true);
+    try {
+      const saved = await request('/me/view-mode', send('PATCH', { view_mode: nextMode }));
+      setMode(saved.view_mode);
+    } catch (error) { showNotice(error.message || 'Could not save your view preference.'); }
+    finally { modeSavePending.current = false; setSavingMode(false); }
+  }
+  async function changeSongKey(key) {
+    if (role !== 'leader' || !song || key === song.key || keySavePending.current) return;
+    const songId = song.id;
+    keySavePending.current = true;
+    setSavingKey(true);
+    try {
+      const saved = normalizeSong(await request(`/songs/${songId}/key`, send('PATCH', { default_key: key })));
+      setSong((current) => current?.id === songId ? saved : current);
+      setSongs((current) => current.map((item) => item.id === songId ? saved : item));
+      const updateSetlist = (item) => ({ ...item, songs: item.songs.map((entry) => entry.id === songId ? saved : entry) });
+      setSetlists((current) => current.map(updateSetlist));
+      setViewingSetlist((current) => current ? updateSetlist(current) : current);
+      showNotice(`Key ${saved.key} saved`);
+    } catch (error) { showNotice(error.message || 'Could not save the key.'); }
+    finally { keySavePending.current = false; setSavingKey(false); }
   }
   async function saveSong(event) {
     event.preventDefault();
@@ -263,7 +335,7 @@ export default function App() {
       }
       await refreshSongsAndLists(); saved = normalizeSong(await request(`/songs/${saved.id}`));
       if (!draft.id) setSongReturnView('catalog');
-      setSong(saved); setPartId(WHOLE_SONG); setModal(''); setView('song'); showNotice('Song saved to the catalog');
+      setSong(saved); setPartId(WHOLE_SONG); setHighlightedPartId(null); setModal(''); setView('song'); showNotice('Song saved to the catalog');
     } catch (error) { showNotice(error.message); }
   }
   async function refreshSongsAndLists() {
@@ -310,7 +382,7 @@ export default function App() {
     const pages = draft.pages.filter((_, i) => i !== index);
     const extracted = !draft.id && pages.every((item) => typeof item.recognizedText === 'string') ? pages.map((item) => item.recognizedText).join('\n\n') : null;
     const suggestions = extracted === null ? null : parseChartText(extracted);
-    setDraft((current) => ({ ...current, pages, ...(suggestions ? { title: suggestions.title, writer: suggestions.writer, key: suggestions.key, parts: suggestions.parts.length ? suggestions.parts : [{ ...current.parts[0], lyrics: extracted.trim(), chords: '', chord_marks: [] }], ocrText: extracted } : {}), removedPageIds: page.id && !page.file ? [...(current.removedPageIds || []), page.id] : current.removedPageIds || [] }));
+      setDraft((current) => ({ ...current, pages, ...(suggestions ? { title: suggestions.title, writer: suggestions.writer, key: suggestions.key || current.key || 'C', parts: suggestions.parts.length ? suggestions.parts : [{ ...current.parts[0], lyrics: extracted.trim(), chords: '', chord_marks: [] }], ocrText: extracted } : {}), removedPageIds: page.id && !page.file ? [...(current.removedPageIds || []), page.id] : current.removedPageIds || [] }));
   }
   function movePage(index, delta) {
     const nextIndex = index + delta;
@@ -319,7 +391,7 @@ export default function App() {
     [pages[index], pages[nextIndex]] = [pages[nextIndex], pages[index]];
     const extracted = !draft.id && pages.every((page) => typeof page.recognizedText === 'string') ? pages.map((page) => page.recognizedText).join('\n\n') : null;
     const suggestions = extracted === null ? null : parseChartText(extracted);
-    setDraft((current) => ({ ...current, pages, ...(suggestions ? { title: suggestions.title || '', writer: suggestions.writer || '', key: suggestions.key || '', parts: suggestions.parts.length ? suggestions.parts : [{ ...current.parts[0], lyrics: extracted.trim(), chords: '', chord_marks: [] }], ocrText: extracted } : {}) }));
+    setDraft((current) => ({ ...current, pages, ...(suggestions ? { title: suggestions.title || '', writer: suggestions.writer || '', key: suggestions.key || current.key || 'C', parts: suggestions.parts.length ? suggestions.parts : [{ ...current.parts[0], lyrics: extracted.trim(), chords: '', chord_marks: [] }], ocrText: extracted } : {}) }));
   }
   function addPart() { setDraft((current) => ({ ...current, parts: [...current.parts, { id: crypto.randomUUID(), name: `Verse ${current.parts.length + 1}`, lyrics: '', chords: '', chord_marks: [] }] })); }
   function updatePart(id, field, value) { setDraft((current) => ({ ...current, parts: (current.parts || []).map((part) => part.id === id ? { ...part, [field]: value } : part) })); }
@@ -347,12 +419,12 @@ export default function App() {
     });
   }
   function removePart(id) { setDraft((current) => ({ ...current, parts: current.parts.filter((part) => part.id !== id) })); }
-  function removeChord(part, at) { updatePart(part.id, 'chord_marks', (part.chord_marks || []).filter((mark) => mark.at !== at)); }
   function applyPastedChart() {
     const parsed = parsePastedChart(pastedChartText);
     if (!parsed.parts.length) { showNotice('Could not find song lyrics in that text. Keep the line breaks and try again.'); return; }
-    setDraft((current) => ({ ...current, title: parsed.title || current.title, writer: parsed.writer || current.writer, key: parsed.key || current.key, parts: parsed.parts, ocrText: pastedChartText }));
+    setDraft((current) => ({ ...current, title: parsed.title || current.title, writer: parsed.writer || current.writer, key: parsed.key || current.key || 'C', parts: parsed.parts, ocrText: pastedChartText }));
     setChordProDraft(serializeChordPro(parsed.parts)); setSongEditorMode('sections');
+    setSongStep('review');
     showNotice(`Imported ${parsed.parts.length} song part${parsed.parts.length === 1 ? '' : 's'}; review the chord positions`);
   }
   async function importSongTextFile(event) {
@@ -364,9 +436,10 @@ export default function App() {
       const chordPro = parseChordPro(text);
       const parsed = chordPro.isChordPro ? chordPro : parsePastedChart(text);
       if (!parsed.parts.length) throw new Error('Could not find song lyrics in that file.');
-      setDraft((current) => ({ ...current, title: parsed.title || current.title, writer: parsed.writer || current.writer, key: parsed.key || current.key, parts: parsed.parts, ocrText: text }));
+      setDraft((current) => ({ ...current, title: parsed.title || current.title, writer: parsed.writer || current.writer, key: parsed.key || current.key || 'C', parts: parsed.parts, ocrText: text }));
       setChordProDraft(serializeChordPro(parsed.parts)); setSongEditorMode(chordPro.isChordPro ? 'chordpro' : 'sections');
       setPastedChartText(text);
+      setSongStep('review');
       showNotice(`Imported ${parsed.parts.length} song part${parsed.parts.length === 1 ? '' : 's'} from file`);
     } catch (error) { showNotice(error.message || 'Could not read that song file'); }
     input.value = '';
@@ -403,6 +476,7 @@ export default function App() {
   }
   async function selectPart(id) {
     setPartId(id);
+    setHighlightedPartId(id === WHOLE_SONG ? null : id);
     if (role !== 'leader' || !currentSetlistId || !song) return;
     try { await request(`/setlists/${currentSetlistId}/state`, send('PUT', { song_id: Number(song.id), section_id: id === WHOLE_SONG ? null : id })); }
     catch (error) { showNotice(error.message); }
@@ -513,10 +587,10 @@ export default function App() {
         {role === 'leader' && <button type="button" className="nav-link sidebar-settings" aria-label="Team settings" title="Team settings" onClick={openSettings}><Settings size={18}/><span>Settings</span></button>}
         {renderProfileMenu(profileMenuRef)}
       </div>
-      <a className="powered-by-link sidebar-powered-by" href="/" aria-label="Powered by MainzWare — visit homepage"><span>Powered by:</span><b>MainzWare</b></a>
+      <a className="powered-by-link sidebar-powered-by" href="/" aria-label="Powered by MainzWare — visit homepage"><span className="powered-by-copy"><span>Powered by:</span><b>MainzWare</b></span><span className="powered-by-mark-wrap" aria-hidden="true"><img className="powered-by-mark powered-by-mark-light" src={MAINZWARE_MARK_LIGHT} alt=""/><img className="powered-by-mark powered-by-mark-dark" src={MAINZWARE_MARK_DARK} alt=""/></span></a>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="crumb"><span>{brand}</span><span className="crumb-slash">/</span><b>{view === 'home' ? 'Home' : view === 'catalog' ? 'Song catalog' : view === 'setlists' ? 'Set lists' : view === 'archive' ? 'Archive' : 'Song view'}</b></div><div className="top-actions"><span className="online-dot" title="Connected to Live Worship"/></div></header>
+      <header className="topbar"><div className="crumb"><span>{brand}</span><span className="crumb-slash">/</span><b>{view === 'home' ? 'Home' : view === 'catalog' ? 'Song catalog' : view === 'setlists' ? 'Set lists' : view === 'archive' ? 'Archive' : view === 'access' ? 'Manage access' : 'Song view'}</b></div><div className="top-actions"><span className="online-dot" title="Connected to Live Worship"/></div></header>
       <div className="content">
       {view === 'home' && <>
         <div className="page-heading home-heading"><div><div className="eyebrow">UPCOMING SERVICES</div><h1>Services</h1><p>{activeSetlists.length} planned</p></div></div>
@@ -543,6 +617,11 @@ export default function App() {
           </div>
         </section>
       </>}
+      {view === 'access' && role === 'leader' && <>
+        <button className="back-link" onClick={() => { setView(accessReturnView.current); openSettings(); }}><ChevronLeft size={16}/> Back to settings</button>
+        <div className="page-heading"><div><div className="eyebrow">TEAM SETTINGS</div><h1>Manage access</h1><p>Add people, assign roles, and manage access to your team.</p></div></div>
+        <section className="access-panel">{settingsLoading ? <p role="status">Loading team access…</p> : settingsError ? <div role="alert"><p>{settingsError}</p><button className="button secondary" onClick={openManageAccess}>Try again</button></div> : <><div className="modal-divider"><span>TEAM ACCESS</span><small>{members.filter((member) => member.active).length} people</small></div><p className="member-access-help">Create a Live Worship login for beta users, or add someone who already has a MainzWare account. Adding an existing Live Worship username again resets its password.</p><form className="member-add" onSubmit={addMember}><select value={memberAuthType} onChange={(event) => setMemberAuthType(event.target.value)} aria-label="Account type"><option value="live_worship">Live Worship login</option><option value="mainzware">MainzWare account</option></select><input value={memberUsername} onChange={(event) => setMemberUsername(event.target.value)} placeholder="Username" aria-label="New member username" required/>{memberAuthType === 'live_worship' && <input type="password" autoComplete="new-password" value={memberPassword} onChange={(event) => setMemberPassword(event.target.value)} placeholder="Initial password (8+ characters)" aria-label="Initial password" minLength="8" required/>}<select value={memberRole} onChange={(event) => setMemberRole(event.target.value)} aria-label="New member role"><option value="choir">Choir</option><option value="musician">Musician</option><option value="leader">Leader</option></select><button className="button primary"><CirclePlus size={15}/> Add person</button></form><div className="member-list">{sortedMembers.map((member) => <div className="member-row" key={member.id}><div className="role-avatar small-avatar">{(member.username || '?').slice(0, 1).toUpperCase()}</div><b>{member.username}</b><small className="member-auth-type">{member.auth_type === 'live_worship' ? 'Live Worship login' : 'MainzWare account'}</small><select value={member.role} onChange={(event) => changeMemberRole(member, event.target.value)} aria-label={`Role for ${member.username}`}><option value="leader">Leader</option><option value="choir">Choir</option><option value="musician">Musician</option></select><button className="icon-button member-remove" onClick={() => removeMember(member)} title={`Remove ${member.username}`}><X size={14}/></button></div>)}</div>{!sortedMembers.length && <p>No active team members.</p>}</>}</section>
+      </>}
       {view === 'catalog' && <>
         <div className="page-heading catalog-heading"><div><div className="eyebrow">SONG LIBRARY</div><h1>Your songs</h1><p>{songs.length} {songs.length === 1 ? 'song' : 'songs'} in the catalog</p></div>{role === 'leader' && <button className="button primary" onClick={newSong}><CirclePlus size={17}/> Add a song</button>}</div>
         <div className="catalog-tools"><label className="search"><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search songs"/></label></div>
@@ -553,22 +632,24 @@ export default function App() {
       {view === 'song' && song && <>
         <button className="back-link" onClick={returnFromSong}><ChevronLeft size={16}/> {songReturnView === 'setlists' ? 'Back to set lists' : songReturnView === 'catalog' ? 'Back to catalog' : 'Back to services'}</button>
         <div className="song-view-head">
-          <div><div className="eyebrow">NOW SINGING <span className="live-tag"><i/> LIVE</span></div><h1>{song.title}</h1><p>{song.writer || 'Writer not listed'} <span className="middot">·</span> Key <b>{song.key || '—'}</b></p></div>
+          <div><div className="eyebrow">NOW SINGING <span className="live-tag"><i/> LIVE</span></div><h1>{song.title}</h1><div className="song-key-metadata"><p>{song.writer || 'Writer not listed'}{song.original_key && <> <span className="middot">·</span> Original key <b>{song.original_key}</b></>}</p>{role === 'leader' && <label className="song-key-control">{song.key ? 'Transpose to' : 'Set key'}<select aria-label="Song key" value={song.key || ''} disabled={savingKey} onChange={(event) => changeSongKey(event.target.value)}><option value="" disabled>Select key</option>{song.key && !MUSICAL_KEYS.includes(song.key) && <option value={song.key}>{song.key}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select>{savingKey && <small role="status">Saving…</small>}</label>}</div></div>
           <div className="song-head-actions">
-            {role === 'leader' && currentSetlist && currentSongIndex >= 0 && <div className="setlist-stepper"><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex - 1)} disabled={currentSongIndex === 0} aria-label="Previous set list song"><ChevronLeft size={16}/></button><span>{currentSongIndex + 1} of {currentSetlist.songs.length} · {currentSetlist.name}</span><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex + 1)} disabled={currentSongIndex >= currentSetlist.songs.length - 1} aria-label="Next set list song"><ChevronRight size={16}/></button></div>}
-            {role === 'leader' && <button className="button quiet" onClick={() => editSong(song)}><Pencil size={15}/> Edit song</button>}
+            {role === 'leader' && <button className="button quiet" disabled={savingKey} onClick={() => editSong(song)}><Pencil size={15}/> Edit song</button>}
           </div>
         </div>
         <div className="song-workspace">
           <section className="lyrics-panel">
-            <div className="lyrics-toolbar"><div><small>SONG PARTS</small><span>{role === 'leader' ? 'Tap a part to guide everyone' : 'Following the worship leader'}</span></div>{role !== 'leader' && <span className="following"><i/> Leader is guiding</span>}</div>
-            <div className="part-tabs"><button className={`${showWholeSong ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} onClick={() => role === 'leader' && selectPart(WHOLE_SONG)}>Whole song{showWholeSong && role !== 'leader' && <i/>}</button>{song.parts.map((part, i) => <button className={`${partId === part.id ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} key={part.id} onClick={() => role === 'leader' && selectPart(part.id)}><span>{String(i + 1).padStart(2, '0')}</span>{part.name}{partId === part.id && role !== 'leader' && <i/>}</button>)}</div>
-            <div className="lyric-sheet">
-              <div className="sheet-meta"><b>{showWholeSong ? 'Whole song' : activePart?.name}</b><span>KEY {song.key || '—'}</span></div>
-              {showWholeSong ? song.parts.map((part) => <section className="whole-song-part" key={part.id}><h3>{part.name}</h3>{mode === 'musician' ? <ChordLyrics part={part}/> : <ChoirLyrics text={part.lyrics}/>}</section>) : mode === 'musician' ? <ChordLyrics part={activePart}/> : <ChoirLyrics text={activePart?.lyrics}/>} 
-              {role === 'leader' && <div className="leader-hint"><Sparkles size={15}/> Choose a part above to guide the choir and musicians.</div>}
+            <div className="lyrics-toolbar"><div><small>SONG PARTS</small><span>{role === 'leader' ? 'Tap a part to guide everyone' : 'Following the worship leader'}</span></div>{role === 'leader' && <div className="view-mode-control"><span>View as:</span><div className="mode-toggle"><button aria-pressed={mode === 'choir'} className={mode === 'choir' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('choir')}><Users size={14}/> Choir</button><button aria-pressed={mode === 'musician'} className={mode === 'musician' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('musician')}><Guitar size={14}/> Musician</button></div></div>}{role !== 'leader' && <span className="following"><i/> Leader is guiding</span>}</div>
+            <div className="song-controls">
+            <div className="part-tabs"><button className={`${showWholeSong ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} onClick={() => role === 'leader' && selectPart(WHOLE_SONG)}>Top{showWholeSong && role !== 'leader' && <i/>}</button>{song.parts.map((part) => <button className={`${partId === part.id ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} key={part.id} onClick={() => role === 'leader' && selectPart(part.id)}>{displayPartName(part.name)}{partId === part.id && role !== 'leader' && <i/>}</button>)}</div>
+            {role === 'leader' && currentSetlist && currentSongIndex >= 0 && <div className="setlist-stepper"><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex - 1)} disabled={currentSongIndex === 0} aria-label="Previous set list song"><ChevronLeft size={16}/></button><span>Song {currentSongIndex + 1} of {currentSetlist.songs.length}</span><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex + 1)} disabled={currentSongIndex >= currentSetlist.songs.length - 1} aria-label="Next set list song"><ChevronRight size={16}/></button></div>}
             </div>
-            <div className="lyrics-footer"><span>{mode === 'musician' ? 'Musician view · chords aligned to lyrics' : 'Choir view · lyrics'}</span>{role === 'leader' ? <div className="mode-toggle"><button className={mode === 'choir' ? 'selected' : ''} onClick={() => setMode('choir')}><Users size={14}/> Choir</button><button className={mode === 'musician' ? 'selected' : ''} onClick={() => setMode('musician')}><Guitar size={14}/> Musician</button></div> : <span className="role-display-note">{role === 'musician' ? 'Musician view' : 'Choir view'}</span>}</div>
+            <div className="lyric-sheet" ref={songTopRef}>
+              <div className="sheet-meta"><b>Song lyrics</b><span>KEY {song.key || '—'}</span></div>
+              {song.parts.map((part) => <section className={`whole-song-part ${highlightedPartId === part.id ? 'is-guided' : ''}`} key={part.id} ref={(element) => { songPartRefs.current[part.id] = element; }}><h3>{displayPartName(part.name)}</h3>{mode === 'musician' ? <ChordLyrics part={part}/> : <ChoirLyrics text={part.lyrics}/>}</section>)}
+              {role === 'leader' && <div className="leader-hint"><Sparkles size={15}/> Tap a part above to scroll everyone to it.</div>}
+            </div>
+            <div className="lyrics-footer"><span>{mode === 'musician' ? 'Musician view · chords aligned to lyrics' : 'Choir view · lyrics'}</span>{role !== 'leader' && <span className="role-display-note">{role === 'musician' ? 'Musician view' : 'Choir view'}</span>}</div>
           </section>
           <details className="source-panel source-details">
             <summary><span>Original paper chart</span><small>{song.pages?.length || 0} page{song.pages?.length === 1 ? '' : 's'}</small>{role === 'leader' && <span className="source-edit-hint">Edit photos</span>}</summary>
@@ -579,7 +660,7 @@ export default function App() {
         </div>
       </>}
       </div>
-      <footer className="main-footer"><span>MADE FOR WORSHIP, TOGETHER</span><a className="powered-by-link" href="/">Powered by: <b>MainzWare</b></a></footer>
+      <footer className="main-footer"><span>MADE FOR WORSHIP, TOGETHER</span></footer>
     </main>
     {notice && <div className="toast">{notice}</div>}
     {previewImage && <div className="image-preview-scrim" onMouseDown={(event) => event.target === event.currentTarget && setPreviewImage(null)}><section className="image-preview-dialog" role="dialog" aria-modal="true" aria-label={previewImage.title}><button type="button" className="image-preview-close" onClick={() => setPreviewImage(null)} aria-label="Close image preview"><X size={20}/></button><img src={previewImage.src} alt={previewImage.title}/><span>{previewImage.title} · click outside or press Escape to close</span></section></div>}
@@ -588,6 +669,7 @@ export default function App() {
       <form className="modal-card song-modal" onSubmit={saveSong}>
         <div className="modal-head"><div><div className="eyebrow">{draft.id ? 'EDIT CATALOG ENTRY' : 'NEW CATALOG ENTRY'}</div><h2>{draft.id ? 'Edit song' : 'Add a song'}</h2></div><button type="button" className="icon-button" onClick={() => setModal('')} aria-label="Close"><X size={18}/></button></div>
         <button type="button" className="button quiet song-import-methods" onClick={() => setImportMethodsOpen((open) => !open)} aria-expanded={importMethodsOpen} aria-controls="song-import-method-options" disabled={ocrBusy}><ChevronDown size={16}/>Import Methods</button>
+        {!draft.id && <p className="import-support-note">Supports copied charts from EssentialWorship.com, lyrics, chord charts, and ChordPro files.</p>}
         <div id="song-import-method-options" hidden={!importMethodsOpen}>
           <div className="entry-methods">
             <button type="button" className="entry-method" onClick={() => chooseSongEntry('manual')}><span className="entry-method-icon"><Music2 size={20}/></span><b>Paste or enter lyrics</b><small>Paste lyrics or a chord chart, choose a text file, or type the song by hand.</small><span className="entry-method-action">Continue <ChevronRight size={15}/></span></button>
@@ -595,6 +677,7 @@ export default function App() {
           </div>
         </div>
         {songSource === 'photo' && <div className="song-steps"><span className={songStep === 'photos' ? 'active' : 'complete'}><b>1</b> Paper pages</span><i/><span className={songStep === 'review' ? 'active' : ''}><b>2</b> Review song</span></div>}
+        {songSource === 'manual' && !draft.id && <div className="song-steps"><span className={songStep === 'import' ? 'active' : 'complete'}><b>1</b> Import text</span><i/><span className={songStep === 'review' ? 'active' : ''}><b>2</b> Review song</span></div>}
         {songStep === 'photos' ? <>
           <p className="intake-intro">Add the pages in reading order. We’ll capture the lyrics and any section labels for you to review.</p>
           {ocrBusy && <PhotoProcessing status={ocrStatus}/>}
@@ -602,10 +685,13 @@ export default function App() {
           {draft.pages?.length > 0 && <div className="page-thumbs">{draft.pages.map((page, i) => <div className="page-thumb" key={`${page.id || page.name}-${i}`}><div className="page-thumb-top">{!draft.id && <div className="page-order-controls"><button type="button" onClick={() => movePage(i, -1)} disabled={i === 0 || ['reading', 'loading'].includes(ocrStatus) || ocrStatus.startsWith('recognizing')} aria-label={`Move page ${i + 1} earlier`}><ArrowUp size={12}/></button><button type="button" onClick={() => movePage(i, 1)} disabled={i === draft.pages.length - 1 || ['reading', 'loading'].includes(ocrStatus) || ocrStatus.startsWith('recognizing')} aria-label={`Move page ${i + 1} later`}><ArrowDown size={12}/></button></div>}<button type="button" onClick={() => removePage(i)} disabled={ocrBusy} aria-label={`Remove page ${i + 1}`}><X size={13}/></button></div><button type="button" className="page-image-preview image-preview-trigger" onClick={() => setPreviewImage({ src: page.image, title: `Song page ${i + 1}` })} aria-label={`Enlarge song page ${i + 1}`}><img src={page.image} alt=""/></button><span>Page {i + 1}</span></div>)}</div>}
           {!ocrBusy && <div className={`ocr-note ${ocrStatus === 'error' ? 'warning' : ''}`}><Sparkles size={16}/><span><b>{ocrStatus === 'idle' ? 'Turn your photos into lyrics' : ocrStatus === 'loading' ? 'Preparing your photos…' : ocrStatus.startsWith('recognizing') ? `Reading page ${ocrStatus.split('-')[1]} of ${ocrStatus.split('-')[2]}` : ocrStatus === 'done' ? 'Your lyrics are ready to review' : ocrStatus === 'error' ? 'Could not read these photos' : 'Reading photos'}</b><small>{ocrStatus === 'error' ? 'Try again, or continue and type or paste the lyrics yourself.' : 'We’ll read the lyrics and find parts like verses and choruses. Check for mistakes before saving. Chords can be added afterward.'}</small></span></div>}
           <div className="modal-footer"><button type="button" className="button quiet" onClick={() => setModal('')}>Cancel</button><button className="button primary" type="submit" disabled={ocrBusy}>{ocrBusy ? <>Reading photos… <span className="photo-processing-spinner" aria-hidden="true"/></> : <>Continue to review <ChevronRight size={16}/></>}</button></div>
+        </> : songStep === 'import' ? <>
+          <p className="intake-intro">Paste the lyrics or chord chart first. We’ll organize the song into parts on the next step so you can check everything before saving.</p>
+          <SongImportPanel pastedChartText={pastedChartText} setPastedChartText={setPastedChartText} applyPastedChart={applyPastedChart} importSongTextFile={importSongTextFile}/>
+          <div className="modal-footer"><button type="button" className="button quiet" onClick={() => setModal('')}>Cancel</button></div>
         </> : <>
           <p className="intake-intro">{songEditorMode === 'chordpro' ? 'Edit the song in ChordPro. Put chords in brackets before the lyric word where they begin, and use section directives to organize the song.' : 'Review the lyrics and section names. Switch to ChordPro if you want to add or edit chords.'}</p>
-          <div className="form-grid"><label className="field wide">Song title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Song title"/></label><label className="field">Writer<input value={draft.writer || ''} onChange={(event) => setDraft({ ...draft, writer: event.target.value })} placeholder="Writer, if known"/></label><label className="field">Key<input value={draft.key || ''} onChange={(event) => setDraft({ ...draft, key: event.target.value })} placeholder="e.g. G"/></label></div>
-          <details className="paste-chart-panel" open><summary><span>Import lyrics or chord chart</span><small>Paste text, choose a file, or add song photos</small></summary><div className="paste-chart-body"><label className="field paste-chart-field">Paste lyrics or chord chart<textarea value={pastedChartText} onChange={(event) => setPastedChartText(event.target.value)} placeholder={'Paste lyrics here. Section names such as Verse 1 or Chorus will be organized automatically.'} rows="8" spellCheck="false"/></label><div className="paste-import-actions"><button className="button primary" type="button" onClick={applyPastedChart} disabled={!pastedChartText.trim()}>Save</button><span>Or</span><label className="button secondary chordpro-import">Choose a song file<input type="file" accept=".cho,.chordpro,.pro,.txt,text/plain" onChange={importSongTextFile}/></label></div><small className="paste-file-help">Text files and chord chart files are supported. For paper song pages, open Import Methods and choose “Use song photos”.</small></div></details>
+          <div className="form-grid"><label className="field wide">Song title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Song title"/></label><label className="field">Writer / author<input value={draft.writer || ''} onChange={(event) => setDraft({ ...draft, writer: event.target.value })} placeholder="Writer or author, if known"/></label><label className="field">{draft.id ? 'Transpose to key (on save)' : 'Original key'}<select value={draft.key || ''} onChange={(event) => setDraft({ ...draft, key: event.target.value })}><option value="">Select key</option>{draft.key && !MUSICAL_KEYS.includes(draft.key) && <option value={draft.key}>{draft.key}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select></label></div>
           {songSource !== 'manual' && <div className="review-photo-row"><span>{draft.pages?.length ? `${draft.pages.length} paper page${draft.pages.length === 1 ? '' : 's'} attached` : 'No paper pages attached'}</span><button className="button quiet small" type="button" onClick={() => setSongStep('photos')}><ImagePlus size={15}/> Review photos</button></div>}
           <div className="ocr-note"><Sparkles size={16}/><span><b>{songEditorMode === 'chordpro' ? 'ChordPro song editor' : ocrStatus === 'done' ? 'Review lyrics and section labels' : 'Review song details'}</b><small>{songEditorMode === 'chordpro' ? 'ChordPro is an editing format; the catalog saves plain lyrics by named song section and keeps chord positions alongside them.' : 'Check the lyrics and section labels, then add the song title, writer, and key before saving.'}</small></span></div>
           <div className="song-editor-toolbar"><div className="editor-mode-toggle"><button type="button" className={songEditorMode === 'chordpro' ? 'selected' : ''} onClick={() => changeSongEditorMode('chordpro')}>ChordPro</button><button type="button" className={songEditorMode === 'sections' ? 'selected' : ''} onClick={() => changeSongEditorMode('sections')}>Song parts</button></div>{songEditorMode === 'sections' && <button className="button quiet small" type="button" onClick={addPart}><CirclePlus size={14}/> Add song part</button>}</div>
@@ -614,18 +700,16 @@ export default function App() {
           {draft.parts.map((part) => <div className="part-editor" key={part.id}>
             <div className="part-editor-head"><input value={part.name} onChange={(event) => updatePart(part.id, 'name', event.target.value)} aria-label="Part name" placeholder="Verse, chorus, bridge…"/><button type="button" onClick={() => removePart(part.id)} aria-label={`Remove ${part.name}`} disabled={draft.parts.length <= 1}><Trash2 size={14}/></button></div>
             <label className="field lyrics-field">Lyrics<textarea value={part.lyrics} onChange={(event) => updateLyrics(part.id, event.target.value)} placeholder="Enter or correct the lyrics for this part" rows="5"/></label>
-            {part.chords && !(part.chord_marks || []).length && <div className="unplaced-chords"><b>Unplaced chord sequence</b><span>{part.chords}</span><small>Switch to ChordPro to position these chords over the lyrics.</small></div>}
-            {(part.chord_marks || []).length > 0 && <div className="placed-chords"><b>Placed chords</b>{part.chord_marks.map((mark) => <button type="button" className="chord-chip" key={`${mark.at}-${mark.chord}`} onClick={() => removeChord(part, mark.at)} title={`Remove ${mark.chord}`}><span>{mark.chord}</span><X size={12}/></button>)}</div>}
           </div>)}
           </>}
-          <div className="modal-footer"><button type="button" className="button quiet" onClick={() => songSource === 'manual' ? setModal('') : setSongStep('photos')}>{songSource !== 'manual' && <ChevronLeft size={16}/>}{songSource === 'manual' ? 'Cancel' : 'Back to photos'}</button><button className="button primary" type="submit">Save song</button></div>
+          <div className="modal-footer">{draft.id && role === 'leader' && <button type="button" className="button danger" style={{ marginRight: 'auto' }} onClick={() => setModal('delete-from-editor')}><Trash2 size={15}/> Delete song</button>}<button type="button" className="button quiet" onClick={() => draft.pages?.length ? setSongStep('photos') : setModal('')}>{Boolean(draft.pages?.length) && <ChevronLeft size={16}/>}{draft.pages?.length ? 'Back to photos' : 'Cancel'}</button><button className="button primary" type="submit">Save song</button></div>
         </>}
       </form>
     </div>}
     {modal === 'setlist-detail' && viewingSetlist && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card setlist-detail-modal"><div className="modal-head"><div><div className="eyebrow">SERVICE SET LIST</div><h2>{viewingSetlist.name}</h2><p className="setlist-detail-date">{new Date(viewingSetlist.serviceAt).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p></div><button type="button" className="icon-button" onClick={() => setModal('')} aria-label="Close set list"><X size={18}/></button></div><div className="modal-divider"><span>SONGS</span><small>{viewingSetlist.songs.length} selected</small></div>{viewingSetlist.songs.length ? <div className="service-songs setlist-detail-songs">{viewingSetlist.songs.map((item, index) => <div key={item.id}><span>{String(index + 1).padStart(2, '0')}</span>{item.title}<small>KEY {item.key || '—'}</small></div>)}</div> : <div className="empty-song-options">No songs have been added to this set list yet.</div>}<div className="modal-footer">{role === 'leader' && <button type="button" className="button quiet" style={{ marginRight: 'auto' }} onClick={() => openSetlist(viewingSetlist)}><Pencil size={14}/> Edit set list</button>}{viewingSetlist.songs.length > 0 && <button type="button" className="button dark" onClick={() => { setModal(''); startService(viewingSetlist); }}><Play size={14}/> Open service</button>}</div></div></div>}
     {modal === 'setlist' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><form key={draft?.id || 'new-setlist'} className="modal-card" onSubmit={createSetlist}><div className="modal-head"><div><div className="eyebrow">WORSHIP PLANNING</div><h2>{draft?.id ? 'Edit set list' : 'Create a set list'}</h2></div><button type="button" className="icon-button" onClick={() => { setDraft(null); setModal(''); }}><X size={18}/></button></div><label className="field">Service name<input name="name" list="worship-service-names" defaultValue={draft?.name || 'Sunday a.m.'} required/><datalist id="worship-service-names"><option value="Sunday a.m."/><option value="Sunday p.m."/><option value="Wednesday p.m."/><option value="Revival service"/><option value="Impromptu service"/></datalist></label><label className="field service-date">When's the service?<input name="serviceAt" type="datetime-local" required defaultValue={draft?.serviceAt ? new Date(new Date(draft.serviceAt).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : new Date(Date.now() + 86400000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}/></label><div className="modal-divider"><span>CHOOSE SONGS</span><small>{selectedSetlistSongIds.length} selected · {songs.length} available</small></div>{songs.length > 0 && <label className="search select-song-search"><Search size={17}/><input type="search" aria-label="Search catalog songs" value={setlistSongQuery} onChange={(event) => setSetlistSongQuery(event.target.value)} placeholder="Search by title, writer, or key"/></label>}<div className="select-songs">{songs.length ? filteredSetlistSongs.length ? filteredSetlistSongs.map((item) => <label key={item.id}><input type="checkbox" name="songs" value={item.id} checked={selectedSetlistSongIds.includes(item.id)} onChange={(event) => setSelectedSetlistSongIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))}/><span><b>{item.title}</b><small>{item.writer}</small></span><span className="key-pill"><span>KEY</span> {item.key}</span></label>) : <div className="empty-song-options">No songs match “{setlistSongQuery}”.</div> : <div className="empty-song-options">No songs in the catalog yet. Add songs first, then return here to choose them.</div>}</div><div className="archive-help"><Archive size={14}/> Automatically moves to archive 6 hours after service time.</div><div className="modal-footer">{draft?.id && <button type="button" className="button danger" style={{ marginRight: 'auto' }} onClick={() => setModal('confirm-delete-setlist')}><Trash2 size={14}/> Delete set list</button>}<button type="button" className="button quiet" onClick={() => { setDraft(null); setModal(''); }}>Cancel</button><button className="button dark">{draft?.id ? 'Save changes' : 'Create set list'}</button></div></form></div>}
-    {modal === 'settings' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card settings-modal"><div className="modal-head"><div><h2>Team settings</h2></div><button type="button" aria-label="Close" className="icon-button" onClick={() => setModal('')}><X size={18}/></button></div>{settingsLoading ? <p role="status">Loading team settings…</p> : settingsError ? <div role="alert"><p>Could not load team settings: {settingsError}</p><button type="button" className="button secondary" onClick={openSettings}>Try again</button></div> : <><form onSubmit={saveBrand}><label className="field">Team name<input name="name" defaultValue={brand} maxLength="80" required/></label><div className="modal-footer settings-save"><button className="button primary">Save name</button></div></form><section className="logo-settings"><div className="settings-section-title"><b>Team logo</b><span>Shown beside your team name</span></div><div className="logo-settings-row"><div className="logo-preview">{brandLogo ? <img src={brandLogo} alt="Current team logo"/> : <Music2 size={25}/>}</div><label className="button secondary logo-pick">{brandLogo ? 'Change logo' : 'Choose a logo'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadLogo}/></label>{brandLogo && <button type="button" className="button text-button" onClick={removeLogo}>Remove</button>}</div></section><div className="modal-divider"><span>TEAM ACCESS</span><small>{members.filter((member) => member.active).length} people</small></div><p className="member-access-help">Create a Live Worship login for beta users, or add someone who already has a MainzWare account. Adding an existing Live Worship username again resets its password.</p><form className="member-add" onSubmit={addMember}><select value={memberAuthType} onChange={(event) => setMemberAuthType(event.target.value)} aria-label="Account type"><option value="live_worship">Live Worship login</option><option value="mainzware">MainzWare account</option></select><input value={memberUsername} onChange={(event) => setMemberUsername(event.target.value)} placeholder="Username" aria-label="New member username" required/>{memberAuthType === 'live_worship' && <input type="password" autoComplete="new-password" value={memberPassword} onChange={(event) => setMemberPassword(event.target.value)} placeholder="Initial password (8+ characters)" aria-label="Initial password" minLength="8" required/>}<select value={memberRole} onChange={(event) => setMemberRole(event.target.value)} aria-label="New member role"><option value="choir">Choir</option><option value="musician">Musician</option><option value="leader">Leader</option></select><button className="button primary"><CirclePlus size={15}/> Add person</button></form><div className="member-list">{members.filter((member) => member.active).map((member) => <div className="member-row" key={member.id}><div className="role-avatar small-avatar">{(member.username || '?').slice(0, 1).toUpperCase()}</div><b>{member.username}</b><small className="member-auth-type">{member.auth_type === 'live_worship' ? 'Live Worship login' : 'MainzWare account'}</small><select value={member.role} onChange={(event) => changeMemberRole(member, event.target.value)} aria-label={`Role for ${member.username}`}><option value="leader">Leader</option><option value="choir">Choir</option><option value="musician">Musician</option></select><button className="icon-button member-remove" onClick={() => removeMember(member)} title={`Remove ${member.username}`}><X size={14}/></button></div>)}</div><div className="storage-summary"><div className="storage-summary-head"><span>PHOTO STORAGE</span><b>{storage.total_megabytes} MB</b></div><div className="storage-meter"><i style={{ width: `${Math.min(100, storage.total_bytes / (1024 * 1024 * 1024) * 100)}%` }}/></div><small>{storage.page_count} song pages · {(storage.total_bytes / 1073741824).toFixed(3)} GB used</small></div></>}</div></div>}
-    {modal === 'delete' && <div className="modal-scrim"><div className="modal-card confirm-modal"><div className="confirm-icon"><Trash2/></div><h2>Remove this song?</h2><p><b>{song?.title}</b> will be removed from the catalog and any set lists.</p><div className="modal-footer"><button className="button quiet" onClick={() => setModal('')}>Keep song</button><button className="button danger" onClick={() => { deleteSong(song.id); setModal(''); }}>Remove song</button></div></div></div>}
+    {modal === 'settings' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card settings-modal"><div className="modal-head"><div><h2>Team settings</h2></div><button type="button" aria-label="Close" className="icon-button" onClick={() => setModal('')}><X size={18}/></button></div>{settingsLoading ? <p role="status">Loading team settings…</p> : settingsError ? <div role="alert"><p>Could not load team settings: {settingsError}</p><button type="button" className="button secondary" onClick={openSettings}>Try again</button></div> : <><form onSubmit={saveBrand}><label className="field">Team name<input name="name" defaultValue={brand} maxLength="80" required/></label><div className="modal-footer settings-save"><button className="button primary">Save name</button></div></form><section className="logo-settings"><div className="settings-section-title"><b>Team logo</b><span>Shown beside your team name</span></div><div className="logo-settings-row"><div className="logo-preview">{brandLogo ? <img src={brandLogo} alt="Current team logo"/> : <Music2 size={25}/>}</div><label className="button secondary logo-pick">{brandLogo ? 'Change logo' : 'Choose a logo'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadLogo}/></label>{brandLogo && <button type="button" className="button text-button" onClick={removeLogo}>Remove</button>}</div></section><section className="settings-access-link"><div><b>Team access</b><p>Add people and manage their roles.</p></div><button type="button" className="button secondary" onClick={openManageAccess}><Users size={16}/> Manage access <ChevronRight size={16}/></button></section><div className="storage-summary"><div className="storage-summary-head"><span>PHOTO STORAGE</span><b>{storage.total_megabytes} MB</b></div><div className="storage-meter"><i style={{ width: `${Math.min(100, storage.total_bytes / (1024 * 1024 * 1024) * 100)}%` }}/></div><small>{storage.page_count} song pages · {(storage.total_bytes / 1073741824).toFixed(3)} GB used</small></div></>}</div></div>}
+    {['delete', 'delete-from-editor'].includes(modal) && <div className="modal-scrim"><div className="modal-card confirm-modal"><div className="confirm-icon"><Trash2/></div><h2>Remove this song?</h2><p><b>{modal === 'delete-from-editor' ? draft?.title : song?.title}</b> will be removed from the catalog and any set lists.</p><div className="modal-footer"><button className="button quiet" onClick={() => setModal(modal === 'delete-from-editor' ? 'song' : '')}>Keep song</button><button className="button danger" onClick={() => deleteSong(modal === 'delete-from-editor' ? draft.id : song.id)}>Remove song</button></div></div></div>}
     {modal === 'confirm-delete-setlist' && <div className="modal-scrim"><div className="modal-card confirm-modal"><div className="confirm-icon"><Trash2/></div><h2>Delete this set list?</h2><p><b>{draft?.name}</b> and its selected songs will be removed.</p><div className="modal-footer"><button className="button quiet" onClick={() => setModal('setlist')}>Keep set list</button><button className="button danger" onClick={() => deleteSetlist(draft.id)}>Delete set list</button></div></div></div>}
   </div>;
 }
@@ -651,8 +735,26 @@ function PhotoProcessing({ status }) {
   </div>;
 }
 
+function SongImportPanel({ pastedChartText, setPastedChartText, applyPastedChart, importSongTextFile }) {
+  return <details className="paste-chart-panel" open>
+    <summary><span>Import lyrics or chord chart</span><small>Paste text or choose a song file</small></summary>
+    <div className="paste-chart-body">
+      <label className="field paste-chart-field">Paste lyrics or chord chart
+        <textarea value={pastedChartText} onChange={(event) => setPastedChartText(event.target.value)} placeholder={'Jesus Be The Name\n\n## By: Elevation Worship\n\nTranspose:\nC\n\n[INTRO]\n| Db Ab/C | Gb |\n\n[VERSE 1]\nDb           Ab/C      Gb\nI could sing Your name for all my life\n\n[CHORUS 1]\nBbm        Ab          Gb\nJesus be the Name ever on my lips\n\nYou can also paste a ChordPro chart with chords in [brackets].'} rows="12" spellCheck="false"/>
+      </label>
+      <div className="paste-import-actions">
+        <button className="button primary" type="button" onClick={applyPastedChart} disabled={!pastedChartText.trim()}>Use this text and continue to review <ChevronRight size={16}/></button>
+        <span>Or</span>
+        <label className="button secondary chordpro-import">Choose a song file<input type="file" accept=".cho,.chordpro,.pro,.txt,text/plain" onChange={importSongTextFile}/></label>
+      </div>
+      <small className="paste-file-help">Supports copied charts from EssentialWorship.com, lyrics, chord charts, and ChordPro files. The next step will organize the song into parts for you to review.</small>
+    </div>
+  </details>;
+}
+
 function ChoirLyrics({ text }) {
   const lines = normalizeWhitespaceEntities(text || 'Lyrics have not been added for this part yet.').split('\n');
+  while (lines.length > 1 && !lines.at(-1).trim()) lines.pop();
   const containerRef = useRef(null);
   const lineRefs = useRef([]);
   const [fontSizes, setFontSizes] = useState({});
@@ -680,16 +782,23 @@ function ChoirLyrics({ text }) {
 function ChordLyrics({ part }) {
   if (!part) return null;
   const lyrics = normalizeWhitespaceEntities(part.lyrics || 'Lyrics have not been added for this part yet.').split('\n');
+  while (lyrics.length > 1 && !lyrics.at(-1).trim()) lyrics.pop();
   const marks = part.chord_marks || [];
   let offset = 0;
   return <div className="chord-score">
     {lyrics.map((line, index) => {
-      const chars = Array.from(line);
-      const lineMarks = marks.filter((mark) => mark.at >= offset && mark.at <= offset + chars.length).map((mark) => ({ ...mark, localAt: mark.at - offset }));
-      const start = offset;
-      offset += chars.length + 1;
-      return <div className="aligned-line" key={`${index}-${line}`} style={{ '--lyric-columns': Math.max(chars.length, 1) }}>
-        {lineMarks.map((mark) => <span className="aligned-chord" key={`${mark.at}-${mark.chord}`} style={{ gridColumnStart: mark.localAt + 1 }}>{mark.chord}</span>)}
+    const chars = Array.from(line);
+    const lineMarks = marks.filter((mark) => mark.at >= offset && mark.at <= offset + chars.length).map((mark) => ({ ...mark, localAt: mark.at - offset }));
+    const groupedMarks = [...lineMarks.reduce((groups, mark) => {
+      const existing = groups.get(mark.localAt);
+      if (existing) existing.chords.push(mark.chord);
+      else groups.set(mark.localAt, { ...mark, chords: [mark.chord] });
+      return groups;
+    }, new Map()).values()];
+    const start = offset;
+    offset += chars.length + 1;
+    return <div className="aligned-line" key={`${index}-${line}`} style={{ '--lyric-columns': Math.max(chars.length, 1) }}>
+        {groupedMarks.map((mark) => <span className="aligned-chord" key={`${mark.at}-${mark.chords.join('-')}`} style={{ gridColumnStart: mark.localAt + 1 }}>{mark.chords.join(' ')}</span>)}
         {chars.map((char, charIndex) => <span className="lyric-char" key={`${start + charIndex}-${char}`}>{char === ' ' ? '\u00a0' : char}</span>)}
         {!chars.length && <span className="lyric-char">{'\u00a0'}</span>}
       </div>;
@@ -700,7 +809,7 @@ function ChordLyrics({ part }) {
 
 function parseChartText(text) {
   const lines = String(text || '').split(/\r?\n/).map((line) => line.replace(/\s+/g, ' ').replace(/^[|•·]+\s*/, '').replace(/[|~\\=]+\s*$/, '').trim()).filter(Boolean);
-  const heading = /^\[?\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|ending|outro|pre[- ]?chorus)\s*\]?\s*:?$/i;
+  const heading = /^\[?\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|vamp|ending|outro|pre[- ]?chorus)\s*\]?\s*:?$/i;
   const ignored = (line) => /^(description|difficulty|tuning|standard tuning|key|writer|words|music|lyrics|chords?|capo|written by|page)\b\s*[:\-]?/i.test(line)
     || /https?:\/\/|www\./i.test(line)
     || /ultimate\s*guitar/i.test(line)
@@ -728,7 +837,7 @@ function parseChartText(text) {
   else if (leadingLyrics.length) sections.unshift({ name: 'Verse 1', lyrics: leadingLyrics });
   // PaddleOCR can mistake decorative labels or page artifacts for section
   // headings. Do not turn those empty detections into blank editor cards.
-  const populatedSections = sections.filter((section) => section.lyrics.some((line) => line.trim()));
+  const populatedSections = sections.filter((section) => !/^instrumental\b/i.test(section.name) && section.lyrics.some((line) => line.trim()));
   return {
     title,
     writer: '',
@@ -773,6 +882,7 @@ function serializeChordPro(parts) {
             : lower.startsWith('outro') ? 'outro'
       : lower.startsWith('refrain') ? 'refrain'
         : lower.startsWith('tag') ? 'tag'
+          : lower.startsWith('vamp') ? 'vamp'
           : lower.startsWith('turn') ? 'turn'
             : lower.startsWith('interlude') ? 'interlude'
               : lower.startsWith('instrumental') ? 'instrumental'
@@ -789,6 +899,8 @@ function serializeChordPro(parts) {
       for (const chord of marks.get(at) || []) lyrics += `[${chord}]`;
       if (at < chars.length) lyrics += chars[at];
     }
+    const unplaced = String(part.chords || '').trim();
+    if (unplaced) lyrics = `${unplaced}${lyrics ? `\n${lyrics}` : ''}`;
     return `{start_of_${type}: ${name}}\n${lyrics}\n{end_of_${type}}`;
   }).join('\n\n');
 }
@@ -796,7 +908,45 @@ function serializeChordPro(parts) {
 function normalizeWhitespaceEntities(text) {
   return String(text || '')
     .replace(/&amp;(?=(?:nbsp|#(?:x0*a0|0*160|x0*20|0*32));)/gi, '&')
-    .replace(/&(?:nbsp|#(?:x0*a0|0*160|x0*20|0*32));/gi, ' ');
+    .replace(/&(?:nbsp|#(?:x0*a0|0*160|x0*20|0*32));/gi, ' ')
+    .replace(/&#0*39;|&#x0*27;/gi, "'")
+    .replace(/&#0*34;|&#x0*22;/gi, '"')
+    .replace(/&#0*8217;|&#x2019;/gi, '’')
+    .replace(/&#0*8216;|&#x2018;/gi, '‘')
+    .replace(/&#0*8211;|&#x2013;/gi, '–')
+    .replace(/&#0*8212;|&#x2014;/gi, '—');
+}
+
+function importedChartText(text) {
+  const source = String(text || '');
+  if (!/<(?:html|body|main|article|script|style)\b/i.test(source)) return source;
+  if (typeof DOMParser === 'undefined') return source;
+  try {
+    const document = new DOMParser().parseFromString(source, 'text/html');
+    document.querySelectorAll('script,style,noscript,svg').forEach((node) => node.remove());
+    const content = document.querySelector('main, article') || document.body;
+    return content?.innerText || content?.textContent || source;
+  } catch (_error) {
+    return source;
+  }
+}
+
+function isImportedPageChrome(line) {
+  const clean = String(line || '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[*_]/g, '')
+    .replace(/^[-•]\s*/, '')
+    .trim();
+  return /^(?:skip to content|toggle menu|find a song|worship leaders|blog|store|about us|english|login\s*\/\s*register|add to planning center|resources|songwriters?\s*:|ccli\s*#?\s*:|recommended key\s*:|tempo\s*\/\s*bpm\s*:|more songs from this artist|tags\b|who we are|text us|terms of use|privacy policy|do not sell my personal information|your california privacy rights|©)/i.test(clean)
+    || /essentialworship\.com\/my-account/i.test(String(line || ''));
+}
+
+function trimImportedPageChrome(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const firstSection = lines.findIndex((line) => /^(?:\[[^\]]+\]|#+\s*)?(?:intro|verse|v|chorus|refrain|bridge|pre[-_ ]?chorus|tag|turn|interlude|instrumental|ending|outro)\b/i.test(line.trim()));
+  const start = firstSection >= 0 ? firstSection + 1 : 0;
+  const chrome = lines.findIndex((line, index) => index >= start && isImportedPageChrome(line));
+  return (chrome >= 0 ? lines.slice(0, chrome) : lines).join('\n');
 }
 
 function parseChordPro(text) {
@@ -809,7 +959,7 @@ function parseChordPro(text) {
     sections.push(current);
     return current;
   };
-  const sectionNames = { verse: 'Verse', chorus: 'Chorus', bridge: 'Bridge', pre_chorus: 'Pre-Chorus', intro: 'Intro', outro: 'Outro', refrain: 'Refrain', tag: 'Tag', turn: 'Turn', interlude: 'Interlude', instrumental: 'Instrumental', ending: 'Ending' };
+  const sectionNames = { verse: 'Verse', chorus: 'Chorus', bridge: 'Bridge', pre_chorus: 'Pre-Chorus', intro: 'Intro', outro: 'Outro', refrain: 'Refrain', tag: 'Tag', vamp: 'Vamp', turn: 'Turn', interlude: 'Interlude', instrumental: 'Instrumental', ending: 'Ending' };
   const addLyricLine = (part, line) => {
     const offset = part.lyricLines.reduce((size, lyric) => size + Array.from(lyric).length, 0) + part.lyricLines.length;
     const lyric = [];
@@ -847,7 +997,7 @@ function parseChordPro(text) {
         continue;
       }
       if (['eov', 'eoc', 'eob'].includes(directive)) { current = null; isChordPro = true; continue; }
-      const sectionMatch = directive.match(/^(start_of|end_of)_(verse|chorus|bridge|pre_chorus|intro|outro|refrain|tag|turn|interlude|instrumental|ending)$/);
+      const sectionMatch = directive.match(/^(start_of|end_of)_(verse|chorus|bridge|pre_chorus|intro|outro|refrain|tag|vamp|turn|interlude|instrumental|ending)$/);
       if (sectionMatch) {
         const [, action, type] = sectionMatch;
         if (action === 'end_of') current = null;
@@ -870,7 +1020,7 @@ function parseChordPro(text) {
       continue;
     }
 
-    const heading = line.match(/^\[?\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|ending|outro|pre[-_ ]?chorus)\s*\]?\s*:?$/i);
+    const heading = line.match(/^\[?\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|vamp|ending|outro|pre[-_ ]?chorus)\s*\]?\s*:?$/i);
     if (heading) {
       createPart(normalizePartName(heading[1].replace(/_/g, '-')));
       isChordPro = true;
@@ -882,7 +1032,7 @@ function parseChordPro(text) {
     if (current.chord_marks.length > beforeMarks) isChordPro = true;
   }
 
-  const parts = sections.map((part) => ({
+  const parts = sections.filter((part) => !/^instrumental\b/i.test(part.name)).map((part) => ({
     id: part.id,
     name: part.name,
     lyrics: part.lyricLines.join('\n'),
@@ -904,31 +1054,71 @@ function inlineSectionHeading(tokens, index) {
   if (/^PRE[-_]CHORUS$/.test(upper)) return { name: 'Pre-Chorus', consumed: 1 };
   const verse = upper.match(/^V(?:ERSE)?(\d+)$/) || (upper === 'VERSE' && /^\d+$/.test(clean(tokens[index + 1])) ? [null, clean(tokens[index + 1])] : null);
   if (verse) return { name: `Verse ${verse[1]}`, consumed: upper === 'VERSE' ? 2 : 1 };
-  if (['VERSE', 'V'].includes(upper)) return { name: 'Verse', consumed: 1 };
-  const simple = { CHORUS: 'Chorus', BRIDGE: 'Bridge', TURN: 'Turn', INTRO: 'Intro', OUTRO: 'Outro', TAG: 'Tag', REFRAIN: 'Refrain', ENDING: 'Ending', INTERLUDE: 'Interlude' };
+  const simple = { VERSE: 'Verse', V: 'Verse', CHORUS: 'Chorus', BRIDGE: 'Bridge', TURN: 'Turn', INTRO: 'Intro', OUTRO: 'Outro', TAG: 'Tag', VAMP: 'Vamp', REFRAIN: 'Refrain', ENDING: 'Ending', INTERLUDE: 'Interlude', INSTRUMENTAL: 'Instrumental' };
+  const numbered = upper.match(/^(CHORUS|BRIDGE|TURN|INTRO|OUTRO|TAG|VAMP|REFRAIN|ENDING|INTERLUDE|INSTRUMENTAL)(\d+)$/)
+    || (simple[upper] && /^\d+$/.test(clean(tokens[index + 1])) ? [null, upper, clean(tokens[index + 1])] : null);
+  if (numbered) return { name: `${simple[numbered[1]]} ${numbered[2]}`, consumed: simple[upper] ? 2 : 1 };
   return simple[upper] ? { name: simple[upper], consumed: 1 } : null;
 }
 
 function parseInlineChordChart(text) {
   const source = normalizeWhitespaceEntities(text).trim();
   if (!source) return null;
-  const sourceLines = source.split(/\r\n?/).map((line) => line.trim()).filter(Boolean);
+  const sourceLines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const sectionLine = /^(?:\[[^\]]+\]|#+\s*)?(?:intro|verse|v|chorus|refrain|bridge|pre[-_ ]?chorus|tag|vamp|turn|interlude|instrumental|ending|outro)\b/i;
+  const firstSection = sourceLines.findIndex((line) => sectionLine.test(line));
+  const metadataLines = firstSection > 0 ? sourceLines.slice(0, firstSection) : [];
+  const body = firstSection > 0 ? sourceLines.slice(firstSection).join('\n') : source;
+  const titleHeading = metadataLines.find((line) => /^#+\s+/.test(line) && !isImportedPageChrome(line));
+  const titleLine = titleHeading || metadataLines.find((line) => !isImportedPageChrome(line) && !/https?:\/\//i.test(line) && !/^(?:#+\s*)?(?:by|writer|artist|composer|lyricist|transpose|key)\s*:/i.test(line) && !/^[A-G](?:#|b|♯|♭)?m?$/i.test(line));
+  const title = titleLine?.replace(/^#+\s*/, '').trim() || '';
+  const writer = metadataLines.find((line) => /^(?:#+\s*)?(?:by|writer|artist|composer|lyricist)\s*:/i.test(line))?.replace(/^(?:#+\s*)?(?:by|writer|artist|composer|lyricist)\s*:\s*/i, '').trim() || '';
+  const transposeIndex = metadataLines.findIndex((line) => /^(?:#+\s*)?transpose\s*:/i.test(line));
+  const explicitKey = metadataLines.find((line) => /^(?:#+\s*)?key\s*:/i.test(line))?.match(/\bkey\s*:\s*([A-G](?:#|b|♯|♭)?m?)/i)?.[1] || '';
+  const transposeText = transposeIndex >= 0
+    ? [metadataLines[transposeIndex].replace(/^(?:#+\s*)?transpose\s*:\s*/i, ''), ...metadataLines.slice(transposeIndex + 1)].join(' ')
+    : '';
+  const firstTransposeKey = transposeText.match(/(?:^|[\s|])([A-G](?:#|b|♯|♭)?m?)(?=$|[\s|])/i)?.[1] || '';
+  const key = explicitKey.replace('♯', '#').replace('♭', 'b') || firstTransposeKey.replace('♯', '#').replace('♭', 'b');
+  const parseSource = body;
+  const parseLines = parseSource.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   // Keep the line-aware parser for traditional charts with a separate chord row
   // above each lyric row; inline parsing is for chord names embedded in lyrics.
-  if (sourceLines.length > 1 && sourceLines.some((line) => getPastedChordTokens(line))) return null;
-  const tokens = source.match(/[^\s]+|\r?\n/g) || [];
+  const tokenMatches = [...parseSource.matchAll(/[^\s]+|\r?\n/g)];
+  const tokens = tokenMatches.map((match) => match[0]);
+  const tokenStarts = tokenMatches.map((match) => match.index || 0);
+  const tokenEnds = tokenMatches.map((match) => (match.index || 0) + match[0].length);
+  const sourceColumn = (from, to) => {
+    const segment = parseSource.slice(from, to);
+    const lastBreak = Math.max(segment.lastIndexOf('\n'), segment.lastIndexOf('\r'));
+    return Array.from(segment.slice(lastBreak + 1)).reduce((column, character) => {
+      if (character === '\t') return column + (8 - (column % 8));
+      return column + 1;
+    }, 0);
+  };
+  const preservedIndent = (from, to) => {
+    const column = sourceColumn(from, to);
+    return column > 1 ? column - 1 : 0;
+  };
   const headingCount = tokens.reduce((count, _token, index) => count + Number(Boolean(inlineSectionHeading(tokens, index))), 0);
   const chordCount = tokens.filter((token) => /^[A-G]/.test(token) && isChordProToken(token)).length;
+  if (!headingCount && parseLines.length > 1 && parseLines.some((line) => getPastedChordTokens(line))) return null;
   // A single labeled section is still useful input, and unlabeled inline
   // charts can be imported as a whole song when they contain several chords.
   if (!headingCount && chordCount < 3) return null;
 
   const parts = [];
   let current = null;
+  let skippingInstrumental = false;
   let pendingChords = [];
+  let chordRunStart = null;
+  let chordRunOffset = 0;
+  let lastTokenEnd = 0;
   const flushUnplacedChords = () => {
-    if (current && pendingChords.length && !current.lyrics) current.chords = pendingChords.join(' - ');
+    if (current && pendingChords.length && !current.lyrics) current.chords = pendingChords.map(({ chord }) => chord).join(' - ');
     pendingChords = [];
+    chordRunStart = null;
+    chordRunOffset = 0;
   };
   const createPart = (name) => {
     flushUnplacedChords();
@@ -938,62 +1128,120 @@ function parseInlineChordChart(text) {
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
+    const tokenEnd = tokenEnds[index] || tokenStarts[index] + token.length;
     if (/^\r?\n$/.test(token)) {
       if (current?.lyrics) current.lyrics += '\n';
+      if (!pendingChords.length) chordRunStart = null;
+      lastTokenEnd = tokenEnd;
       continue;
     }
-    if (/^\\+$/.test(token)) continue;
+    if (/^\\+$/.test(token)) {
+      lastTokenEnd = tokenEnd;
+      continue;
+    }
     const heading = inlineSectionHeading(tokens, index);
     if (heading) {
       const attachedRepeat = String(token).match(/\(((?:\d+x|x\d+))\)$/i);
       const followingRepeat = String(tokens[index + heading.consumed] || '').match(/^\(?((?:\d+x|x\d+))\)?$/i);
-      const repeat = attachedRepeat?.[1] || followingRepeat?.[1];
-      createPart(repeat ? `${heading.name} (${repeat})` : heading.name);
+      const headingEnd = tokenEnds[index + heading.consumed - 1] || tokenEnd;
+      if (heading.name === 'Instrumental') {
+        current = null;
+        pendingChords = [];
+        chordRunStart = null;
+        chordRunOffset = 0;
+        skippingInstrumental = true;
+        index += heading.consumed - 1;
+        if (!attachedRepeat && followingRepeat) index += 1;
+        lastTokenEnd = tokenEnds[index] || headingEnd;
+        continue;
+      }
+      skippingInstrumental = false;
+      chordRunStart = null;
+      chordRunOffset = 0;
+      // Repeat markers such as (X2) describe playback, not a distinct song part.
+      createPart(heading.name);
       index += heading.consumed - 1;
       if (!attachedRepeat && followingRepeat) index += 1;
+      lastTokenEnd = tokenEnds[index] || headingEnd;
       continue;
     }
-    if (/^(?:\(?\d+x\)?|x\d+)$/i.test(token.replace(/[),]/g, '')) || /^[-–—]+$/.test(token)) continue;
+    if (skippingInstrumental) {
+      lastTokenEnd = tokenEnd;
+      continue;
+    }
+    if (/^(?:\(?\d+x\)?|x\d+)$/i.test(token.replace(/[),]/g, '')) || /^[-–—]+$/.test(token)) {
+      lastTokenEnd = tokenEnd;
+      continue;
+    }
     if (!current) createPart(`Verse ${parts.filter((part) => part.name.startsWith('Verse')).length + 1}`);
 
     const slashBass = token.match(/^\/([A-G](?:#|b)?)$/);
     if (slashBass && pendingChords.length) {
-      pendingChords[pendingChords.length - 1] += `/${slashBass[1]}`;
+      pendingChords[pendingChords.length - 1].chord += `/${slashBass[1]}`;
+      lastTokenEnd = tokenEnd;
       continue;
     }
     if (/^[A-G]/.test(token) && isChordProToken(token)) {
-      pendingChords.push(token.replace(/[,:;]+$/, ''));
+      if (current.lyrics && !current.lyrics.endsWith('\n')) {
+        current.lyrics += '\n';
+        chordRunStart = tokenStarts[index];
+        chordRunOffset = preservedIndent(lastTokenEnd, tokenStarts[index]);
+      } else if (chordRunStart === null) {
+        chordRunStart = tokenStarts[index];
+        chordRunOffset = preservedIndent(lastTokenEnd, tokenStarts[index]);
+      }
+      pendingChords.push({ chord: token.replace(/[,:;]+$/, ''), column: chordRunOffset + sourceColumn(chordRunStart, tokenStarts[index]) });
+      lastTokenEnd = tokenEnd;
       continue;
     }
 
     const prefix = current.lyrics && !current.lyrics.endsWith('\n') ? ' ' : '';
     const at = Array.from(current.lyrics + prefix).length;
-    for (const chord of pendingChords) current.chord_marks.push({ at, chord });
+    for (const { chord, column } of pendingChords) current.chord_marks.push({ at: at + column, chord });
     pendingChords = [];
+    chordRunStart = null;
+    chordRunOffset = 0;
     current.lyrics += prefix + token;
+    lastTokenEnd = tokenEnd;
   }
   flushUnplacedChords();
-  return { title: '', writer: '', key: '', parts };
+  // Headings used only as repeat cues (for example "ENDING D" or
+  // "BRIDGE 2 TAG") are navigation notes, not lyric parts.
+  const usableParts = parts.filter((part) => !/^instrumental\b/i.test(part.name) && part.lyrics.trim()).map(compactImportedPart);
+  return { title, writer, key, parts: usableParts };
 }
 
 function parsePastedChart(text) {
-  text = normalizeWhitespaceEntities(text);
+  const source = normalizeWhitespaceEntities(importedChartText(text));
+  const looksLikeChordPro = /(?:^|\n)\s*\{\s*(?:title|t|artist|composer|lyricist|writer|key|start_of_|end_of_|sov|soc|sob|eov|eoc|eob|chorus)\b/i.test(source)
+    || /(?:^|\s)\[[A-G](?:#|b|♯|♭)?(?:m|maj|min|sus|dim|aug|add)?\d*(?:\/[A-G](?:#|b|♯|♭)?)?\]/i.test(source);
+  if (looksLikeChordPro) {
+    const chordPro = parseChordPro(source);
+    if (chordPro.isChordPro && chordPro.parts.length) return chordPro;
+  }
+  text = trimImportedPageChrome(source);
+  const worshipTogether = parseWorshipTogetherChart(text);
+  if (worshipTogether) return worshipTogether;
+  const essential = parseEssentialChart(text);
+  if (essential) return essential;
   const inlineChart = parseInlineChordChart(text);
   if (inlineChart) return inlineChart;
   const cleanLine = (line) => line.replace(/\t/g, '    ').replace(/\\+\s*$/, '').replace(/\*\*/g, '');
   const lines = text.replace(/\r\n?/g, '\n').split('\n').map(cleanLine);
   const textLines = lines.map((line) => line.trim()).filter(Boolean);
-  const isSectionTitle = (line) => /^(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|turn|interlude|instrumental|ending|outro|pre[- ]?chorus)\b/i.test(line);
-  const titleLine = textLines.find((line) => /^(title|song)\s*[:\-]/i.test(line));
-  const titleSource = titleLine || textLines.find((line) => !isSectionTitle(line) && !/^(key|writer|words|music|written by)\b/i.test(line) && !getPastedChordTokens(line));
-  let title = titleLine ? titleLine.replace(/^(title|song)\s*[:\-]\s*/i, '').trim() : titleSource || '';
-  let writer = textLines.find((line) => /^(words|music|writer|written by)\s*[:\-]/i.test(line))?.replace(/^(words|music|writer|written by)\s*[:\-]\s*/i, '').trim() || '';
+  const stripMarkdown = (line) => line.replace(/^#+\s*/, '').trim();
+  const isSectionTitle = (line) => /^(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|vamp|turn|interlude|instrumental|ending|outro|pre[- ]?chorus)\b/i.test(stripMarkdown(line));
+  const isMetadata = (line) => /^(title|song|by|recorded by|artist|writer|words|music|written by|transpose|key)\s*[:\-]/i.test(stripMarkdown(line));
+  const titleLine = textLines.find((line) => /^(?:#+\s*)?(title|song)\s*[:\-]/i.test(line));
+  const titleSource = titleLine || textLines.find((line) => !isImportedPageChrome(line) && !/https?:\/\//i.test(line) && !isSectionTitle(line) && !isMetadata(line) && !getPastedChordTokens(line));
+  let title = titleLine ? stripMarkdown(titleLine).replace(/^(title|song)\s*[:\-]\s*/i, '').trim() : stripMarkdown(titleSource || '');
+  let writer = textLines.find((line) => /^(?:#+\s*)?(?:by|recorded by|artist|writer|words|music|written by)\s*[:\-]/i.test(line))?.replace(/^(?:#+\s*)?(?:by|recorded by|artist|writer|words|music|written by)\s*[:\-]\s*/i, '').trim() || '';
   const key = textLines.find((line) => /\bkey\s*[:\-]?\s*[A-G][#b]?\s*(major|minor|maj|min|m)?\b/i.test(line))?.match(/\bkey\s*[:\-]?\s*([A-G][#b]?(?:\s*(?:major|minor|maj|min|m))?)/i)?.[1]?.replace(/\s+/g, ' ') || '';
   const byline = title.match(/^(.*?)\s+\(([^()]+)\)$/);
   if (byline) { title = byline[1].trim(); writer ||= byline[2].trim(); }
 
   const parts = [];
-  const heading = /^\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|turn|interlude|instrumental|ending|outro|pre[- ]?chorus)\s*:\s*(.*)$/i;
+  const heading = /^\s*(intro|verse\s*\d*|v\s*\d+|chorus|refrain|bridge|tag|vamp|turn|interlude|instrumental|ending|outro|pre[- ]?chorus)\s*:\s*(.*)$/i;
   let current = null;
   const createPart = (name) => {
     current = { id: crypto.randomUUID(), name: normalizePartName(name), lyricLines: [], chord_marks: [], pendingChordRows: [], rawChordRows: [] };
@@ -1023,9 +1271,11 @@ function parsePastedChart(text) {
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/, '');
     const clean = line.trim();
-    if (!clean || /^(title|song|key|writer|words|music|written by)\s*[:\-]/i.test(clean)) continue;
+    const metadataClean = stripMarkdown(clean);
+    if (!clean || isMetadata(clean)) continue;
+    if (isImportedPageChrome(clean)) continue;
     if (!titleLine && !titleSkipped && clean === titleSource) { titleSkipped = true; continue; }
-    const section = clean.match(heading);
+    const section = metadataClean.match(heading);
     if (section) {
       if (current) storePendingWithoutLyrics(current);
       createPart(section[1]);
@@ -1047,7 +1297,7 @@ function parsePastedChart(text) {
     title,
     writer,
     key,
-    parts: parts.map((part) => ({
+    parts: parts.filter((part) => !/^instrumental\b/i.test(part.name)).map((part) => ({
       id: part.id,
       name: part.name,
       lyrics: part.lyricLines.join('\n'),
@@ -1057,9 +1307,258 @@ function parsePastedChart(text) {
   };
 }
 
+function worshipTogetherSection(line) {
+  const match = String(line || '').trim().match(/^(intro|verse|v|chorus|refrain|bridge|pre[- ]?chorus|tag|vamp|turn(?:around)?|interlude|instrumental|ending|outro)(?:\s*:?\s*(\d+))?\s*:?[ \t]*$/i);
+  if (!match) return null;
+  const name = match[1].replace(/[-_]/g, ' ');
+  return normalizePartName(`${name}${match[2] ? ` ${match[2]}` : ''}`);
+}
+
+function worshipTogetherChordRow(line) {
+  const source = String(line || '').replace(/\\\|/g, '|').trim();
+  if (!source) return null;
+  const pattern = /[A-G](?:#|b|♯|♭)?(?:[A-Za-z]+)?(?:\d+)?(?:\([A-Za-z0-9+#♯b♭,\/-]+\))?(?:\/[A-G](?:#|b|♯|♭)?)?/g;
+  const matches = [...source.matchAll(pattern)].filter((match) => isWorshipTogetherChord(match[0]));
+  if (!matches.length) return null;
+  let cursor = 0;
+  for (const match of matches) {
+    const gap = source.slice(cursor, match.index).replace(/[|/\-~\\]/g, '').trim();
+    if (gap) return null;
+    cursor = match.index + match[0].length;
+  }
+  if (source.slice(cursor).replace(/[|/\-~\\]/g, '').trim()) return null;
+
+  let plain = '';
+  let last = 0;
+  const marks = [];
+  for (const match of matches) {
+    plain += source.slice(last, match.index);
+    marks.push({ at: Array.from(plain).length, chord: match[0].replace('♯', '#').replace('♭', 'b') });
+    last = match.index + match[0].length;
+  }
+  plain += source.slice(last);
+  const leading = plain.match(/^\s*/)?.[0].length || 0;
+  const trailing = plain.match(/\s*$/)?.[0].length || 0;
+  plain = plain.slice(leading, Math.max(leading, plain.length - trailing));
+  return { plain, marks: marks.map((mark) => ({ ...mark, at: Math.max(0, mark.at - leading) })) };
+}
+
+function isWorshipTogetherChord(value) {
+  return /^(?:N\.?C\.?|[A-G](?:#|b|♯|♭)?(?:[A-Za-z]+)?(?:\d+)?(?:\([A-Za-z0-9+#♯b♭,\/-]+\))?(?:\/[A-G](?:#|b|♯|♭)?)?)$/u.test(String(value || ''));
+}
+
+function parseWorshipTogetherChart(text) {
+  const source = normalizeWhitespaceEntities(String(text || '')).replace(/\r\n?/g, '\n');
+  const lines = source.split('\n').map((line) => line.replace(/\[([^\]]+)\]\((?:https?:\/\/|www\.)[^)]+\)/gi, '$1').replace(/\\\|/g, '|').trim());
+  const firstSection = lines.findIndex((line) => worshipTogetherSection(line));
+  if (firstSection < 1) return null;
+  const chordRows = lines.filter((line) => worshipTogetherChordRow(line));
+  if (chordRows.length < 2 || /\[[A-G](?:#|b|♯|♭)/i.test(source)) return null;
+
+  const noise = (line) => !line || /^[-–—]+$/.test(line) || /https?:\/\/|free chord pro download|transpose|numbers|do re mi|translate|^(?:english|español)$/i.test(line);
+  const preamble = lines.slice(0, firstSection).filter((line) => !noise(line));
+  const title = preamble.find((line) => !/\[[^\]]+\]\([^)]*\)/.test(line)) || '';
+  const writer = preamble.find((line, index) => index > 0 && line.includes(',')) || '';
+  const firstChord = chordRows.flatMap((line) => worshipTogetherChordRow(line)?.marks || [])[0]?.chord || '';
+  const key = firstChord.match(/^[A-G](?:#|b)?/)?.[0] || '';
+  const parts = [];
+  let current = null;
+  let pending = [];
+  const createPart = (name) => {
+    current = { id: crypto.randomUUID(), name, lyricLines: [], chord_marks: [], chords: '' };
+    parts.push(current);
+    pending = [];
+  };
+  const addLyrics = (line, marks = []) => {
+    if (!current) createPart('Verse 1');
+    const base = current.lyricLines.reduce((size, lyric) => size + Array.from(lyric).length, 0) + current.lyricLines.length;
+    current.chord_marks.push(...marks.map((mark) => ({ at: base + Math.min(mark.at, Array.from(line).length), chord: mark.chord })));
+    current.lyricLines.push(line);
+  };
+  const addPendingLyrics = (line) => {
+    const length = Array.from(line).length;
+    const first = pending[0]?.at || 0;
+    const span = Math.max(1, (pending.at(-1)?.at || first) - first);
+    addLyrics(line, pending.map((mark) => ({ ...mark, at: Math.round((mark.at - first) / span * Math.max(0, length - 1)) })));
+    pending = [];
+  };
+
+  for (const line of lines.slice(firstSection)) {
+    const section = worshipTogetherSection(line);
+    if (section) { createPart(section); continue; }
+    if (noise(line) || /^(?:repeat|x\s*\d+)/i.test(line)) continue;
+    const row = worshipTogetherChordRow(line);
+    if (row) {
+      if (/[|/]/.test(row.plain)) addLyrics(row.plain, row.marks);
+      else pending.push(...row.marks);
+      continue;
+    }
+    if (!current || !line) continue;
+    addPendingLyrics(line);
+  }
+
+  const usableParts = parts.filter((part) => part.lyricLines.some((line) => line.trim()) || part.chord_marks.length).map((part) => ({
+    id: part.id,
+    name: part.name,
+    lyrics: part.lyricLines.join('\n'),
+    chords: part.chords,
+    chord_marks: part.chord_marks.sort((a, b) => a.at - b.at),
+  }));
+  return usableParts.length ? { title, writer, key, parts: usableParts } : null;
+}
+
+function parseEssentialChart(text) {
+  const lines = String(text || '').replace(/\r\n?/g, '\n').split('\n').map((line) => line.replace(/\t/g, '    ').replace(/\\+\s*$/, '').replace(/\*\*/g, '').replace(/\u00a0/g, ' '));
+  const sectionPattern = /^\s*\[\s*(intro|verse|v|chorus|refrain|bridge|pre[- ]?chorus|tag|vamp|turn|interlude|instrumental|ending|outro)(?:\s*[-_ ]?\s*(\d+))?\s*\]\s*(?:\[\s*(x?\d+\s*x?)\s*\])?\s*(.*)$/i;
+  const headingOnly = /^\s*\[[^\]]+\]/;
+  const firstSection = lines.findIndex((line) => sectionPattern.test(line.trim()));
+  const hasEssentialSections = firstSection >= 0 && lines.slice(firstSection).some((line) => headingOnly.test(line.trim()));
+  if (!hasEssentialSections) return null;
+
+  const cleanValue = (value) => normalizeWhitespaceEntities(String(value || '').replace(/\s+/g, ' ').trim());
+  const metadataLines = lines.slice(0, firstSection).map((line) => cleanValue(line)).filter(Boolean);
+  const title = metadataLines.find((line) => !isImportedPageChrome(line) && !/https?:\/\//i.test(line) && !/^(?:#+\s*)?(by|recorded by|transpose|key)\s*:/i.test(line) && !/^([A-G](?:#|b)?m?)$/i.test(line))?.replace(/^#+\s*/, '') || '';
+  const writer = metadataLines.find((line) => /^(?:by|recorded by)\s*:/i.test(line))?.replace(/^(?:by|recorded by)\s*:\s*/i, '').trim() || '';
+  const transposeIndex = metadataLines.findIndex((line) => /^transpose\s*:/i.test(line));
+  const transposeText = transposeIndex >= 0
+    ? [metadataLines[transposeIndex].replace(/^transpose\s*:\s*/i, ''), ...metadataLines.slice(transposeIndex + 1)].join(' ')
+    : '';
+  const key = transposeText.match(/(?:^|[\s|])([A-G](?:#|b|♯|♭)?m?)(?=$|[\s|])/i)?.[1]?.replace('♯', '#').replace('♭', 'b') || '';
+  const parts = [];
+  let current = null;
+  const createPart = (name, repeat) => {
+    if (/^instrumental(?:\s+\d+)?$/i.test(String(name || '').trim())) {
+      current = null;
+      return;
+    }
+    // Essential Worship's [X2]/[X3] marker is metadata for the source chart;
+    // it should never become part of the displayed section name.
+    const label = normalizePartName(String(name || '').replace(/\s*\((?:\d+\s*x|x\s*\d+)\)\s*$/i, ''));
+    current = { id: crypto.randomUUID(), name: label, lyricLines: [], chord_marks: [], pendingChordRows: [], rawChordRows: [] };
+    parts.push(current);
+  };
+  const addPending = (part, line, tokens) => part.pendingChordRows.push({ text: line, tokens });
+  const addLyrics = (part, line) => {
+    const lyric = line.replace(/[|]/g, '').replace(/\s+$/g, '').trim();
+    if (!lyric) return;
+    const base = part.lyricLines.reduce((size, value) => size + Array.from(value).length, 0) + part.lyricLines.length;
+    const lyricLength = Array.from(lyric).length;
+    for (const row of part.pendingChordRows) {
+      const firstAt = row.tokens[0]?.at || 0;
+      const span = Math.max(1, (row.tokens.at(-1)?.at || firstAt) - firstAt);
+      for (const token of row.tokens) {
+        const relative = Math.max(0, token.at - firstAt);
+        const at = base + Math.min(lyricLength, Math.round(relative / span * Math.max(0, lyricLength - 1)));
+        part.chord_marks.push({ at, chord: token.chord });
+      }
+    }
+    part.pendingChordRows = [];
+    part.lyricLines.push(lyric);
+  };
+  const appendMixedLine = (part, line, tokens) => {
+    const withoutChords = line.replace(/(?<![A-Za-z])\(?[A-G](?:#|b|♯|♭)?(?:(?:maj|min|m|sus|dim|aug|add)?\d*)?(?:\/[A-G](?:#|b|♯|♭)?)?\)?(?=\s|$|\|)/gi, '').replace(/[|]/g, '');
+    const lyric = withoutChords.replace(/\s+/g, ' ').trim();
+    if (!lyric) { addPending(part, line, tokens); return; }
+    const base = part.lyricLines.reduce((size, value) => size + Array.from(value).length, 0) + part.lyricLines.length;
+    const firstAt = tokens[0]?.at || 0;
+    const span = Math.max(1, line.length - firstAt);
+    tokens.forEach((token) => part.chord_marks.push({ at: base + Math.min(Array.from(lyric).length, Math.round((token.at - firstAt) / span * Math.max(0, Array.from(lyric).length - 1))), chord: token.chord }));
+    part.lyricLines.push(lyric);
+  };
+  for (const rawLine of lines.slice(firstSection)) {
+    const clean = rawLine.trim();
+    if (!clean) continue;
+    const heading = clean.match(sectionPattern);
+    if (heading) {
+      if (current) current.pendingChordRows.splice(0).forEach((row) => current.rawChordRows.push(row.text.trim()));
+      createPart(`${heading[1]}${heading[2] ? ` ${heading[2]}` : ''}`, heading[3]);
+      if (heading[4] && current) {
+        const tokens = getEssentialChordTokens(heading[4]);
+        if (tokens.length && heading[4].replace(/[|\s]/g, '').split('').every((char) => char === '' || /[A-G#b/()]/i.test(char))) addPending(current, heading[4], tokens);
+        else if (tokens.length) appendMixedLine(current, heading[4], tokens);
+        else addLyrics(current, heading[4]);
+      }
+      continue;
+    }
+    if (!current) continue;
+    const tokens = getEssentialChordTokens(rawLine);
+    const chordOnly = tokens.length > 0 && rawLine.replace(/(?<![A-Za-z])\(?[A-G](?:#|b|♯|♭)?(?:(?:maj|min|m|sus|dim|aug|add)?\d*)?(?:\/[A-G](?:#|b|♯|♭)?)?\)?/gi, '').replace(/[|\s]/g, '') === '';
+    if (chordOnly) {
+      addPending(current, rawLine, tokens);
+    } else if (tokens.length) {
+      appendMixedLine(current, rawLine, tokens);
+    } else {
+      addLyrics(current, rawLine);
+    }
+  }
+  for (const part of parts) part.pendingChordRows.splice(0).forEach((row) => part.rawChordRows.push(row.text.trim()));
+  // Essential Worship includes bar-only Intro/Instrumental headings. They do
+  // not give the choir a lyric section to review, so leave them out of the
+  // editable song parts.
+  const usableParts = parts.filter((part) => !/^instrumental\b/i.test(part.name) && part.lyricLines.some((line) => line.trim()));
+  const mergedParts = [];
+  for (const part of usableParts) {
+    if (/^pre[- ]?chorus(?:\b|\s)/i.test(part.name) && mergedParts.length) {
+      const previous = mergedParts.at(-1);
+      const offset = previous.lyricLines.reduce((size, line) => size + Array.from(line).length, 0) + Math.max(0, previous.lyricLines.length);
+      previous.lyricLines.push(...part.lyricLines);
+      previous.chord_marks.push(...part.chord_marks.map((mark) => ({ ...mark, at: mark.at + offset })));
+      previous.rawChordRows.push(...part.rawChordRows);
+      continue;
+    }
+    mergedParts.push(part);
+  }
+  return {
+    title,
+    writer,
+    key,
+    parts: mergedParts.map((part) => ({ id: part.id, name: part.name, lyrics: part.lyricLines.join('\n'), chords: part.rawChordRows.join('\n'), chord_marks: part.chord_marks.sort((a, b) => a.at - b.at) })),
+  };
+}
+
+function getEssentialChordTokens(line) {
+  const tokens = [];
+  const pattern = /(?<![A-Za-z])\(?[A-G](?:#|b|♯|♭)?(?:(?:maj|min|m|sus|dim|aug|add)?\d*)?(?:\/[A-G](?:#|b|♯|♭)?)?\)?(?=\s|$|\|)/gi;
+  for (const match of String(line || '').matchAll(pattern)) {
+    const chord = match[0].replace(/^\(|\)$/g, '').replace('♯', '#').replace('♭', 'b');
+    const after = String(line || '').slice(match.index + match[0].length);
+    if (/^[A-G]$/i.test(chord) && match.index === 0 && /^\s+[a-z]/.test(after)) continue;
+    if (isChordProToken(chord)) tokens.push({ at: match.index, chord });
+  }
+  return tokens;
+}
+
 function normalizePartName(name) {
   const normalized = name.replace(/^v\s*(\d+)$/i, 'Verse $1').replace(/^pre[- ]?chorus$/i, 'Pre-Chorus');
   return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function compactImportedPart(part) {
+  const source = String(part.lyrics || '');
+  const indexMap = [];
+  let lyrics = '';
+  let previousWasNewline = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === '\n' && previousWasNewline) {
+      indexMap[index] = lyrics.length;
+      continue;
+    }
+    indexMap[index] = lyrics.length;
+    lyrics += character;
+    previousWasNewline = character === '\n';
+  }
+  indexMap[source.length] = lyrics.length;
+  return {
+    ...part,
+    lyrics: lyrics.replace(/^\n+|\n+$/g, ''),
+    chord_marks: (part.chord_marks || []).map((mark) => ({ ...mark, at: indexMap[Math.min(mark.at, source.length)] ?? mark.at })),
+  };
+}
+
+function displayPartName(name) {
+  const value = String(name || '').trim();
+  return value;
 }
 
 function getPastedChordTokens(line, allowSingle = false) {

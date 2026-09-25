@@ -15,6 +15,15 @@ import Link from '@mui/material/Link';
 import { Link as RouterLink } from 'react-router-dom';
 import apiClient from '../api/client';
 
+const compactCellSx = {
+  px: { xs: 0.5, sm: 2 },
+  py: { xs: 0.75, sm: 1.5 },
+  fontSize: { xs: '0.72rem', sm: '0.875rem' },
+  overflowWrap: 'anywhere',
+  whiteSpace: 'normal',
+  '& .MuiTableSortLabel-root': { whiteSpace: 'normal', lineHeight: 1.1 },
+};
+
 export default function BudgetVariance({ budgetId, month, canWrite }) {
   const [rows, setRows] = useState([]);
   const [status, setStatus] = useState('loading');
@@ -37,7 +46,7 @@ export default function BudgetVariance({ budgetId, month, canWrite }) {
   });
 
   const sortableHeader = (label, column, align = 'left') => (
-    <TableCell align={align} sortDirection={sortColumn === column ? sortDirection : false}>
+    <TableCell align={align} sortDirection={sortColumn === column ? sortDirection : false} sx={compactCellSx}>
       <TableSortLabel active={sortColumn === column} aria-label={`Sort by ${label}${sortColumn === column ? `. Currently ${sortDirection}ending` : ''}`} direction={sortColumn === column ? sortDirection : 'asc'} onClick={() => requestSort(column)}>
         {label}
       </TableSortLabel>
@@ -70,13 +79,13 @@ export default function BudgetVariance({ budgetId, month, canWrite }) {
   if (status === 'error') return <Alert severity="error">Could not load budget variance.</Alert>;
 
   return (
-    <TableContainer component={Paper} sx={{ mb: 3 }}>
-      <Table stickyHeader aria-label="Budget vs actual for the current month">
+    <TableContainer component={Paper} sx={{ mb: 3, overflowX: 'hidden' }}>
+      <Table stickyHeader size="small" aria-label="Budget vs actual for the current month" sx={{ tableLayout: 'fixed', width: '100%' }}>
         <TableHead>
           <TableRow>
             {sortableHeader('Category', 'category')}
-            {sortableHeader('Budgeted amount', 'budgeted_amount', 'right')}
-            {sortableHeader('Actual (this month)', 'actual_spent', 'right')}
+            {sortableHeader('Budget', 'budgeted_amount', 'right')}
+            {sortableHeader('Actual', 'actual_spent', 'right')}
             {sortableHeader('Variance', 'variance', 'right')}
           </TableRow>
         </TableHead>
@@ -85,16 +94,16 @@ export default function BudgetVariance({ budgetId, month, canWrite }) {
             const variance = Number(row.variance);
             return (
               <TableRow key={row.category}>
-                <TableCell>
+                <TableCell sx={compactCellSx}>
                   <Link
                     component={RouterLink}
-                    to={`/where-da-money?budget=${budgetId}&category=${encodeURIComponent(row.category)}`}
+                    to={`/budget/where-da-money?budget=${budgetId}&category=${encodeURIComponent(row.category)}`}
                     underline="always"
                   >
                     {row.category}
                   </Link>
                 </TableCell>
-                <TableCell align="right">
+                <TableCell align="right" sx={compactCellSx}>
                   <TextField
                     defaultValue={Number(row.budgeted_amount).toFixed(2)}
                     disabled={!canWrite}
@@ -102,11 +111,11 @@ export default function BudgetVariance({ budgetId, month, canWrite }) {
                     size="small"
                     type="number"
                     onBlur={(event) => saveBudgetedAmount(row.category_id, event.target.value)}
-                    sx={{ width: 120 }}
+                    sx={{ width: { xs: 76, sm: 120 }, maxWidth: '100%' }}
                   />
                 </TableCell>
-                <TableCell align="right">{Number(row.actual_spent).toFixed(2)}</TableCell>
-                <TableCell align="right" sx={{ color: variance < 0 ? 'error.main' : 'success.main' }}>
+                <TableCell align="right" sx={compactCellSx}>{Number(row.actual_spent).toFixed(2)}</TableCell>
+                <TableCell align="right" sx={{ ...compactCellSx, color: variance < 0 ? 'error.main' : 'success.main' }}>
                   {variance.toFixed(2)}
                 </TableCell>
               </TableRow>

@@ -103,6 +103,7 @@ final class Api
         $path = rtrim($path, '/') ?: '/';
 
         if ($method === 'GET' && $path === '/me') { $this->respond($this->member); return; }
+        if ($method === 'PATCH' && $path === '/me/view-mode') { $this->saveViewMode(); return; }
         if ($method === 'GET' && $path === '/settings') { $this->settings(); return; }
         if ($method === 'PUT' && $path === '/settings') { $this->updateSettings(); return; }
         if ($method === 'POST' && $path === '/settings/logo') { $this->uploadLogo(); return; }
@@ -118,6 +119,7 @@ final class Api
         if ($method === 'GET' && $path === '/songs') { $this->songs(); return; }
         if ($method === 'POST' && $path === '/songs') { $this->createSong(); return; }
         if ($method === 'GET' && preg_match('#^/songs/(\d+)$#', $path, $m)) { $this->song((int) $m[1]); return; }
+        if ($method === 'PATCH' && preg_match('#^/songs/(\d+)/key$#', $path, $m)) { $this->updateSong((int) $m[1], true); return; }
         if ($method === 'PUT' && preg_match('#^/songs/(\d+)$#', $path, $m)) { $this->updateSong((int) $m[1]); return; }
         if ($method === 'DELETE' && preg_match('#^/songs/(\d+)$#', $path, $m)) { $this->deleteSong((int) $m[1]); return; }
         if ($method === 'POST' && preg_match('#^/songs/(\d+)/pages$#', $path, $m)) { $this->addPages((int) $m[1]); return; }
@@ -132,6 +134,16 @@ final class Api
         if ($method === 'PUT' && preg_match('#^/setlists/(\d+)/state$#', $path, $m)) { $this->updateLiveState((int) $m[1]); return; }
         http_response_code(404);
         echo json_encode(['error' => 'Live Worship endpoint not found.']);
+    }
+
+    private function saveViewMode(): void
+    {
+        Access::leader($this->member);
+        $mode = $this->body()['view_mode'] ?? null;
+        if (!in_array($mode, ['choir', 'musician'], true)) throw new ApiError(400, 'Choose Choir or Musician view.');
+        $stmt = $this->db->prepare('UPDATE live_worship.members SET view_mode=:mode WHERE id=:id');
+        $stmt->execute(['mode' => $mode, 'id' => $this->member['id']]);
+        $this->respond(['view_mode' => $mode]);
     }
 
     private function recognizeSongPage(): void
@@ -368,10 +380,10 @@ final class Api
         $storedPaths = [];
         try {
             $stmt = $this->db->prepare(
-                'INSERT INTO live_worship.songs (title, writer, default_key, lyrics, sections, ocr_text, created_by)
-                 VALUES (:title, :writer, :song_key, :lyrics, CAST(:sections AS jsonb), :ocr_text, :created_by) RETURNING id'
+                'INSERT INTO live_worship.songs (title, writer, default_key, original_key, lyrics, sections, ocr_text, created_by)
+                 VALUES (:title, :writer, :song_key, :original_key, :lyrics, CAST(:sections AS jsonb), :ocr_text, :created_by) RETURNING id'
             );
-            $stmt->execute($fields + ['created_by' => $this->member['id']]);
+            $stmt->execute($fields + ['original_key' => $fields['song_key'], 'created_by' => $this->member['id']]);
             $id = (int) $stmt->fetchColumn();
             foreach ($this->uploadedPages() as $pageNumber => $file) {
                 $page = $this->insertPage($id, $pageNumber + 1, $file);
@@ -382,24 +394,37 @@ final class Api
         $this->respond($this->songData($id), 201);
     }
 
-    private function updateSong(int $id): void
+    private function updateSong(int $id, bool $keyOnly = false): void
     {
         Access::leader($this->member);
-        $this->songData($id);
-        $fields = $this->songFields($this->body());
-        $stmt = $this->db->prepare(
-            'UPDATE live_worship.songs SET title=:title, writer=:writer, default_key=:song_key, lyrics=:lyrics,
-             sections=CAST(:sections AS jsonb), ocr_text=:ocr_text, updated_at=now() WHERE id=:id'
-        );
-        $stmt->execute($fields + ['id' => $id]);
-        $sectionIds = array_column(json_decode($fields['sections'], true, 512, JSON_THROW_ON_ERROR), 'id');
-        $live = $this->db->prepare('SELECT section_id FROM live_worship.live_state WHERE song_id=:id AND is_live=TRUE');
-        $live->execute(['id' => $id]);
-        $liveSection = $live->fetchColumn();
-        if ($liveSection !== false && !in_array($liveSection, $sectionIds, true)) {
+        $body = $this->body();
+        $this->db->beginTransaction();
+        try {
+            $lock = $this->db->prepare('SELECT id FROM live_worship.songs WHERE id=:id FOR UPDATE');
+            $lock->execute(['id' => $id]);
+            $current = $this->songData($id);
+            if ($keyOnly) {
+                $key = trim((string) ($body['default_key'] ?? ''));
+                if ($key === '') throw new ApiError(400, 'Choose a key.');
+                $body = array_replace($current, ['default_key' => $key]);
+            }
+            $fields = $this->songFields($body);
+            $sections = Transpose::sections(json_decode($fields['sections'], true, 512, JSON_THROW_ON_ERROR), $current['default_key'], $fields['song_key']);
+            $fields['sections'] = json_encode($sections, JSON_THROW_ON_ERROR);
+            $stmt = $this->db->prepare(
+                'UPDATE live_worship.songs SET title=:title, writer=:writer, default_key=:song_key,
+                 original_key=COALESCE(original_key, :original_key), lyrics=:lyrics,
+                 sections=CAST(:sections AS jsonb), ocr_text=:ocr_text, updated_at=now() WHERE id=:id'
+            );
+            $stmt->execute($fields + ['original_key' => $current['default_key'] ?: $fields['song_key'], 'id' => $id]);
+            $sectionIds = array_column($sections, 'id');
+            $live = $this->db->prepare('SELECT section_id FROM live_worship.live_state WHERE song_id=:id AND is_live=TRUE');
+            $live->execute(['id' => $id]);
+            $liveSection = $live->fetchColumn();
             $fix = $this->db->prepare('UPDATE live_worship.live_state SET section_id=:section, revision=revision+1, updated_at=now() WHERE song_id=:id AND is_live=TRUE');
-            $fix->execute(['section' => $sectionIds[0] ?? null, 'id' => $id]);
-        }
+            $fix->execute(['section' => $liveSection === null || in_array($liveSection, $sectionIds, true) ? $liveSection : ($sectionIds[0] ?? null), 'id' => $id]);
+            $this->db->commit();
+        } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
         $this->respond($this->songData($id));
     }
 
@@ -592,7 +617,7 @@ final class Api
 
     private function songData(int $id): array
     {
-        $stmt = $this->db->prepare('SELECT id, title, writer, default_key, lyrics, sections, ocr_text, created_at, updated_at FROM live_worship.songs WHERE id=:id');
+        $stmt = $this->db->prepare('SELECT id, title, writer, default_key, original_key, lyrics, sections, ocr_text, created_at, updated_at FROM live_worship.songs WHERE id=:id');
         $stmt->execute(['id' => $id]);
         $song = $stmt->fetch();
         if (!$song) throw new ApiError(404, 'Song not found.');

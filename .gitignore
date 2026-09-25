@@ -35,3 +35,4 @@ __pycache__/
 services/property-scraper/output/
 portal/api/public/uploads/
 live-worship/api/storage/
+live-worship/import-sources/

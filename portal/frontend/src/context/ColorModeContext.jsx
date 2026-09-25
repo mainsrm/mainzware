@@ -10,9 +10,7 @@ const ColorModeContext = createContext(null);
 const AUTHENTICATED_PORTAL_PATHS = new Set([
   '/portal',
   '/properties',
-  '/what-da-money',
-  '/where-da-money',
-  '/snowball',
+  '/technical-analysis',
   '/profile',
   '/admin/users',
 ]);
@@ -53,7 +51,11 @@ export function ColorModeProvider({ children }) {
     };
   }, [userId]);
 
-  const isAuthenticatedPortalPage = Boolean(user) && AUTHENTICATED_PORTAL_PATHS.has(pathname);
+  const isAuthenticatedPortalPage = Boolean(user) && (
+    AUTHENTICATED_PORTAL_PATHS.has(pathname)
+    || pathname === '/budget'
+    || pathname.startsWith('/budget/')
+  );
   const mode = isAuthenticatedPortalPage ? preference : 'light';
   const theme = useMemo(() => createAppTheme(mode), [mode]);
 

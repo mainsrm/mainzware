@@ -1,6 +1,5 @@
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
-import BtcIchimoku from '../components/BtcIchimoku';
 import ProjectCard from '../components/ProjectCard';
 import { navigationFor } from '../navigation';
 import { useAuth } from '../context/AuthContext';
@@ -12,17 +11,12 @@ export default function Dashboard() {
       .filter((item) => item.to !== '/portal' && item.to !== '/')
       .map((item) => ({ name: item.label, description: item.description, url: item.to })),
     {
-      name: 'MainzWare',
-      description: 'Return to the public MainzWare technology solutions homepage.',
-      url: '/',
-    },
-    {
       name: 'Live Worship',
       description: 'Open the independent worship song catalog and live song controls.',
       url: '/live-worship/',
       external: true,
     },
-  ];
+  ].sort((a, b) => Number(a.name === 'Users') - Number(b.name === 'Users'));
 
   return (
     <>
@@ -39,7 +33,6 @@ export default function Dashboard() {
           </Grid>
         ))}
       </Grid>
-      <BtcIchimoku />
     </>
   );
 }

@@ -17,10 +17,10 @@ export default function createAppTheme(mode) {
     components: {
       MuiCssBaseline: {
         styleOverrides: {
-          // Reserve the scrollbar gutter so short/long routes keep the same viewport
-          // width; otherwise the full-width hero image rescales on every navigation.
+          // Let short routes such as Login use the full viewport width. A permanent
+          // scrollbar gutter appears as a blank strip on the right on mobile.
           html: {
-            scrollbarGutter: 'stable',
+            scrollbarGutter: 'auto',
           },
         },
       },

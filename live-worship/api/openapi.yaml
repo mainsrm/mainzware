@@ -8,6 +8,22 @@ servers:
 security:
   - cookieSession: []
 paths:
+  /me/view-mode:
+    patch:
+      summary: Save the signed-in leader's song view preference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [view_mode]
+              properties:
+                view_mode: { type: string, enum: [choir, musician] }
+      responses:
+        '200': { description: Saved view_mode, also returned by GET /me }
+        '400': { description: Invalid mode }
+        '403': { description: Leader role required }
   /auth/login:
     post:
       summary: Sign in with a leader-managed Live Worship account
@@ -122,6 +138,24 @@ paths:
     delete:
       summary: Delete a song and its page files (leader only)
       responses: { '200': { description: Song removed } }
+  /songs/{songId}/key:
+    patch:
+      summary: Transpose and persist a song's key and chords (leader only)
+      description: Preserves original_key and notifies live followers. Assigning a previously unknown key establishes the chart key without shifting chords.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [default_key]
+              properties:
+                default_key: { type: string, example: Db }
+      responses:
+        '200': { description: Song with saved default_key, original_key, and transposed sections }
+        '400': { description: Invalid key }
+        '403': { description: Leader role required }
+        '404': { description: Song not found }
   /songs/{songId}/pages:
     post:
       summary: Append ordered JPEG, PNG, or WebP pages to a song (leader only)
@@ -156,7 +190,7 @@ components:
       properties:
         title: { type: string, maxLength: 200 }
         writer: { type: string }
-        default_key: { type: string }
+        default_key: { type: string, description: Original key on creation. Changing this on update transposes submitted chords from the saved current key. }
         ocr_text: { type: string }
         sections:
           type: array
