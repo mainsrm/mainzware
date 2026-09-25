@@ -104,6 +104,7 @@ final class Api
 
         if ($method === 'GET' && $path === '/me') { $this->respond($this->member); return; }
         if ($method === 'PATCH' && $path === '/me/view-mode') { $this->saveViewMode(); return; }
+        if ($method === 'PATCH' && $path === '/me/theme') { $this->saveTheme(); return; }
         if ($method === 'GET' && $path === '/settings') { $this->settings(); return; }
         if ($method === 'PUT' && $path === '/settings') { $this->updateSettings(); return; }
         if ($method === 'POST' && $path === '/settings/logo') { $this->uploadLogo(); return; }
@@ -144,6 +145,15 @@ final class Api
         $stmt = $this->db->prepare('UPDATE live_worship.members SET view_mode=:mode WHERE id=:id');
         $stmt->execute(['mode' => $mode, 'id' => $this->member['id']]);
         $this->respond(['view_mode' => $mode]);
+    }
+
+    private function saveTheme(): void
+    {
+        $theme = $this->body()['theme'] ?? null;
+        if (!in_array($theme, ['light', 'dark'], true)) throw new ApiError(400, 'Choose light or dark mode.');
+        $stmt = $this->db->prepare('UPDATE live_worship.members SET theme=:theme WHERE id=:id');
+        $stmt->execute(['theme' => $theme, 'id' => $this->member['id']]);
+        $this->respond(['theme' => $theme]);
     }
 
     private function recognizeSongPage(): void

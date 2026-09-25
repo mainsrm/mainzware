@@ -24,6 +24,21 @@ paths:
         '200': { description: Saved view_mode, also returned by GET /me }
         '400': { description: Invalid mode }
         '403': { description: Leader role required }
+  /me/theme:
+    patch:
+      summary: Save the signed-in member's light/dark theme preference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [theme]
+              properties:
+                theme: { type: string, enum: [light, dark] }
+      responses:
+        '200': { description: Saved theme, also returned by GET /me }
+        '400': { description: Invalid theme }
   /auth/login:
     post:
       summary: Sign in with a leader-managed Live Worship account

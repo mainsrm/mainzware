@@ -8,6 +8,13 @@ const MUSICAL_KEYS = [...MAJOR_KEYS, ...MAJOR_KEYS.map((key) => `${key}m`)];
 const MAINZWARE_MARK_LIGHT = `${import.meta.env.BASE_URL}img/mainzware-m-light.png`;
 const MAINZWARE_MARK_DARK = `${import.meta.env.BASE_URL}img/mainzware-m-dark.png`;
 
+function mainzWareLoginUrl() {
+  const portalOrigin = window.location.port === '5174'
+    ? `${window.location.protocol}//${window.location.hostname}:5173`
+    : window.location.origin;
+  return `${portalOrigin}/login?return=${encodeURIComponent('/live-worship/')}`;
+}
+
 export default function App() {
   const [authStatus, setAuthStatus] = useState('checking');
   const [songs, setSongs] = useState([]);
@@ -29,6 +36,7 @@ export default function App() {
   const [mode, setMode] = useState('choir');
   const [savingMode, setSavingMode] = useState(false);
   const modeSavePending = useRef(false);
+  const themeSavePending = useRef(false);
   const [modal, setModal] = useState('');
   const [draft, setDraft] = useState(null);
   const [selectedSetlistSongIds, setSelectedSetlistSongIds] = useState([]);
@@ -44,9 +52,9 @@ export default function App() {
   const ocrBusy = ['reading', 'loading'].includes(ocrStatus) || ocrStatus.startsWith('recognizing');
   const [previewImage, setPreviewImage] = useState(null);
   const [currentSetlistId, setCurrentSetlistId] = useState(null);
-  const [storage, setStorage] = useState({ page_count: 0, total_bytes: 0, total_megabytes: 0 });
   const [members, setMembers] = useState([]);
   const [settingsLoading, setSettingsLoading] = useState(false);
+  const [lyricFontSize, setLyricFontSize] = useState(27);
   const accessReturnView = useRef('home');
   const [settingsError, setSettingsError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -70,6 +78,47 @@ export default function App() {
   const songPartRefs = useRef({});
   const livePollInitialized = useRef(false);
 
+  useLayoutEffect(() => {
+    const sheet = songTopRef.current;
+    if (!sheet || !song) return undefined;
+    const fitLyrics = () => {
+      const computed = getComputedStyle(sheet);
+      const width = sheet.clientWidth - parseFloat(computed.paddingLeft || '0') - parseFloat(computed.paddingRight || '0');
+      if (!width) return;
+      const baseSize = mode === 'musician' ? 22 : 27;
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      const family = mode === 'musician' ? 'SFMono-Regular, Consolas, Liberation Mono, monospace' : 'Georgia, Times New Roman, serif';
+      context.font = `${mode === 'musician' ? 500 : 400} ${baseSize}px ${family}`;
+      const chordContext = mode === 'musician' ? document.createElement('canvas').getContext('2d') : null;
+      if (chordContext) chordContext.font = `700 ${Math.max(12, baseSize * 0.68)}px SFMono-Regular, Consolas, Liberation Mono, monospace`;
+      let maxWidth = 0;
+      song.parts.forEach((part) => {
+        const lines = normalizeWhitespaceEntities(part.lyrics || '').split('\n');
+        let offset = 0;
+        lines.forEach((line) => {
+          const chars = Array.from(line);
+          maxWidth = Math.max(maxWidth, context.measureText(line).width);
+          if (mode === 'musician' && chordContext) {
+            (part.chord_marks || []).filter((mark) => mark.at >= offset && mark.at <= offset + chars.length).forEach((mark) => {
+              const localAt = Math.max(0, Math.min(chars.length, mark.at - offset));
+              const before = chars.slice(0, localAt).join('');
+              maxWidth = Math.max(maxWidth, context.measureText(before).width + chordContext.measureText(mark.chord).width);
+            });
+          }
+          offset += chars.length + 1;
+        });
+      });
+      const nextSize = maxWidth ? Math.min(baseSize, baseSize * width / maxWidth) : baseSize;
+      setLyricFontSize((current) => Math.abs(current - nextSize) > 0.1 ? nextSize : current);
+    };
+    fitLyrics();
+    const observer = new ResizeObserver(fitLyrics);
+    observer.observe(sheet);
+    return () => observer.disconnect();
+  }, [song, mode]);
+
   useEffect(() => {
     document.title = brand;
   }, [brand]);
@@ -77,6 +126,15 @@ export default function App() {
   useEffect(() => {
     if (authStatus === 'ready') window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [authStatus]);
+
+  useEffect(() => {
+    if (authStatus !== 'ready') return;
+    const validViews = ['home', 'catalog', 'setlists', 'archive', 'access', 'song'];
+    if (!validViews.includes(view) || (view === 'song' && !song) || (view === 'access' && role !== 'leader')) {
+      setView('home');
+      setSong(null);
+    }
+  }, [authStatus, role, song, view]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = darkMode ? 'dark' : 'light';
@@ -116,7 +174,7 @@ export default function App() {
       try {
         const [active, archived, me, settings] = await Promise.all([request('/setlists'), request('/setlists?status=archived'), request('/me'), request('/settings')]);
         setSetlists([...active, ...archived].map(normalizeSetlist));
-        setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
+        setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
       } catch (error) {
         if (error.status === 401) setAuthStatus('sign-in');
         else if (error.status === 403) setAuthStatus('not-member');
@@ -189,7 +247,7 @@ export default function App() {
     const [me, settings, songRows, activeRows, archivedRows, live] = await Promise.all([
       request('/me'), request('/settings'), request('/songs'), request('/setlists'), request('/setlists?status=archived'), request('/live'),
     ]);
-    setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); setMode(me.role === 'leader' ? (me.view_mode || 'choir') : me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
+    setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setMode(me.role === 'leader' ? (me.view_mode || 'choir') : me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
     const normalizedSongs = songRows.map(normalizeSong);
     setSongs(normalizedSongs); setSetlists([...activeRows, ...archivedRows].map(normalizeSetlist));
     setCurrentSetlistId(live ? String(live.setlist_id) : null);
@@ -223,8 +281,8 @@ export default function App() {
   }
 
   async function refreshSettings() {
-    const [settings, memberRows, usage] = await Promise.all([request('/settings'), request('/members'), request('/storage')]);
-    setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null); setMembers(memberRows); setStorage(usage);
+    const [settings, memberRows] = await Promise.all([request('/settings'), request('/members')]);
+    setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null); setMembers(memberRows);
   }
 
   function goHome() { setView('home'); setSong(null); }
@@ -286,6 +344,19 @@ export default function App() {
       setMode(saved.view_mode);
     } catch (error) { showNotice(error.message || 'Could not save your view preference.'); }
     finally { modeSavePending.current = false; setSavingMode(false); }
+  }
+  async function changeTheme(nextTheme) {
+    if (themeSavePending.current) return;
+    const previous = darkMode;
+    themeSavePending.current = true;
+    setDarkMode(nextTheme === 'dark');
+    try {
+      const saved = await request('/me/theme', send('PATCH', { theme: nextTheme }));
+      setDarkMode(saved.theme === 'dark');
+    } catch (error) {
+      setDarkMode(previous);
+      showNotice(error.message || 'Could not save your theme preference.');
+    } finally { themeSavePending.current = false; }
   }
   async function changeSongKey(key) {
     if (role !== 'leader' || !song || key === song.key || keySavePending.current) return;
@@ -534,6 +605,7 @@ export default function App() {
       await request('/auth/login', send('POST', { username: loginUsername.trim(), password: loginPassword }));
       setLoginPassword('');
       await refreshApp();
+      setView('home'); setSong(null);
     } catch (error) {
       setLoginError(error.message || 'Could not sign in.');
       setAuthStatus(error.status === 403 ? 'not-member' : 'sign-in');
@@ -542,7 +614,7 @@ export default function App() {
 
   async function continueWithMainzWare() {
     setLoginError(''); setLoading(true);
-    try { await request('/auth/mainzware', send('POST', {})); await refreshApp(); }
+    try { await request('/auth/mainzware', send('POST', {})); await refreshApp(); setView('home'); setSong(null); }
     catch (error) {
       setLoginError(error.status === 401 ? 'Sign in to MainzWare first, then return to Live Worship.' : error.message || 'Could not use your MainzWare session.');
       setAuthStatus('sign-in');
@@ -572,10 +644,10 @@ export default function App() {
   }
 
   function renderProfileMenu(menuRef) {
-    return <div className="profile-menu" ref={menuRef}><button type="button" className="profile-menu-trigger" aria-label={`Profile menu for ${username}, ${roleLabel}`} aria-expanded={profileMenuOpen} aria-haspopup="menu" onClick={() => setProfileMenuOpen((open) => !open)} title={`${username} · ${roleLabel}`}><span className="profile-initial" aria-hidden="true">{usernameInitial}</span><span className="profile-menu-copy"><b>{username}</b><small>{roleLabel}</small></span></button>{profileMenuOpen && <div className="profile-menu-panel" role="menu"><div className="profile-menu-identity"><b>{username}</b><small>{roleLabel}</small></div><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setModal('account-password'); }}><LockKeyhole size={15}/> Change password</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setDarkMode((enabled) => !enabled); }}>{darkMode ? <Sun size={15}/> : <Moon size={15}/>} Turn {darkMode ? 'light' : 'dark'} mode on</button><button type="button" role="menuitem" className="profile-menu-logout" onClick={signOutLiveWorship}><LogOut size={15}/> Log out</button></div>}</div>;
+    return <div className="profile-menu" ref={menuRef}><button type="button" className="profile-menu-trigger" aria-label={`Profile menu for ${username}, ${roleLabel}`} aria-expanded={profileMenuOpen} aria-haspopup="menu" onClick={() => setProfileMenuOpen((open) => !open)} title={`${username} · ${roleLabel}`}><span className="profile-initial" aria-hidden="true">{usernameInitial}</span><span className="profile-menu-copy"><b>{username}</b><small>{roleLabel}</small></span></button>{profileMenuOpen && <div className="profile-menu-panel" role="menu"><div className="profile-menu-identity"><b>{username}</b><small>{roleLabel}</small></div><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setModal('account-password'); }}><LockKeyhole size={15}/> Change password</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); changeTheme(darkMode ? 'light' : 'dark'); }}>{darkMode ? <Sun size={15}/> : <Moon size={15}/>} Turn {darkMode ? 'light' : 'dark'} mode on</button><button type="button" role="menuitem" className="profile-menu-logout" onClick={signOutLiveWorship}><LogOut size={15}/> Log out</button></div>}</div>;
   }
 
-  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Ask a worship leader for access' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'sign-in' ? 'Use the Live Worship account your worship leader gave you, or continue with your MainzWare account.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Ask a worship leader to add it.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button><div className="login-divider"><span>OR</span></div><button className="button quiet" type="button" onClick={continueWithMainzWare} disabled={loading}>Continue with MainzWare</button><a href="/login?return=%2Flive-worship%2F">Sign in to MainzWare</a></form>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
+  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Ask a worship leader for access' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'sign-in' ? 'Use the Live Worship account your worship leader gave you, or continue with your MainzWare account.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Ask a worship leader to add it.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button><div className="login-divider"><span>OR</span></div><button className="button quiet" type="button" onClick={continueWithMainzWare} disabled={loading}>Continue with MainzWare</button><a href={mainzWareLoginUrl()}>Sign in to MainzWare</a></form>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
 
   return <div className={`app-frame ${view === 'song' ? 'is-song-view' : ''}`}>
     <aside className="sidebar">
@@ -644,9 +716,9 @@ export default function App() {
             <div className="part-tabs"><button className={`${showWholeSong ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} onClick={() => role === 'leader' && selectPart(WHOLE_SONG)}>Top{showWholeSong && role !== 'leader' && <i/>}</button>{song.parts.map((part) => <button className={`${partId === part.id ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} key={part.id} onClick={() => role === 'leader' && selectPart(part.id)}>{displayPartName(part.name)}{partId === part.id && role !== 'leader' && <i/>}</button>)}</div>
             {role === 'leader' && currentSetlist && currentSongIndex >= 0 && <div className="setlist-stepper"><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex - 1)} disabled={currentSongIndex === 0} aria-label="Previous set list song"><ChevronLeft size={16}/></button><span>Song {currentSongIndex + 1} of {currentSetlist.songs.length}</span><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex + 1)} disabled={currentSongIndex >= currentSetlist.songs.length - 1} aria-label="Next set list song"><ChevronRight size={16}/></button></div>}
             </div>
-            <div className="lyric-sheet" ref={songTopRef}>
+            <div className="lyric-sheet" ref={songTopRef} style={{ '--song-lyric-font-size': `${lyricFontSize}px` }}>
               <div className="sheet-meta"><b>Song lyrics</b><span>KEY {song.key || '—'}</span></div>
-              {song.parts.map((part) => <section className={`whole-song-part ${highlightedPartId === part.id ? 'is-guided' : ''}`} key={part.id} ref={(element) => { songPartRefs.current[part.id] = element; }}><h3>{displayPartName(part.name)}</h3>{mode === 'musician' ? <ChordLyrics part={part}/> : <ChoirLyrics text={part.lyrics}/>}</section>)}
+              {song.parts.map((part) => <section className={`whole-song-part ${highlightedPartId === part.id ? 'is-guided' : ''}`} key={part.id} ref={(element) => { songPartRefs.current[part.id] = element; }}><h3>{displayPartName(part.name)}</h3>{mode === 'musician' ? <ChordLyrics part={part} fontSize={lyricFontSize}/> : <ChoirLyrics text={part.lyrics} fontSize={lyricFontSize}/>}</section>)}
               {role === 'leader' && <div className="leader-hint"><Sparkles size={15}/> Tap a part above to scroll everyone to it.</div>}
             </div>
             <div className="lyrics-footer"><span>{mode === 'musician' ? 'Musician view · chords aligned to lyrics' : 'Choir view · lyrics'}</span>{role !== 'leader' && <span className="role-display-note">{role === 'musician' ? 'Musician view' : 'Choir view'}</span>}</div>
@@ -708,7 +780,7 @@ export default function App() {
     </div>}
     {modal === 'setlist-detail' && viewingSetlist && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card setlist-detail-modal"><div className="modal-head"><div><div className="eyebrow">SERVICE SET LIST</div><h2>{viewingSetlist.name}</h2><p className="setlist-detail-date">{new Date(viewingSetlist.serviceAt).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p></div><button type="button" className="icon-button" onClick={() => setModal('')} aria-label="Close set list"><X size={18}/></button></div><div className="modal-divider"><span>SONGS</span><small>{viewingSetlist.songs.length} selected</small></div>{viewingSetlist.songs.length ? <div className="service-songs setlist-detail-songs">{viewingSetlist.songs.map((item, index) => <div key={item.id}><span>{String(index + 1).padStart(2, '0')}</span>{item.title}<small>KEY {item.key || '—'}</small></div>)}</div> : <div className="empty-song-options">No songs have been added to this set list yet.</div>}<div className="modal-footer">{role === 'leader' && <button type="button" className="button quiet" style={{ marginRight: 'auto' }} onClick={() => openSetlist(viewingSetlist)}><Pencil size={14}/> Edit set list</button>}{viewingSetlist.songs.length > 0 && <button type="button" className="button dark" onClick={() => { setModal(''); startService(viewingSetlist); }}><Play size={14}/> Open service</button>}</div></div></div>}
     {modal === 'setlist' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><form key={draft?.id || 'new-setlist'} className="modal-card" onSubmit={createSetlist}><div className="modal-head"><div><div className="eyebrow">WORSHIP PLANNING</div><h2>{draft?.id ? 'Edit set list' : 'Create a set list'}</h2></div><button type="button" className="icon-button" onClick={() => { setDraft(null); setModal(''); }}><X size={18}/></button></div><label className="field">Service name<input name="name" list="worship-service-names" defaultValue={draft?.name || 'Sunday a.m.'} required/><datalist id="worship-service-names"><option value="Sunday a.m."/><option value="Sunday p.m."/><option value="Wednesday p.m."/><option value="Revival service"/><option value="Impromptu service"/></datalist></label><label className="field service-date">When's the service?<input name="serviceAt" type="datetime-local" required defaultValue={draft?.serviceAt ? new Date(new Date(draft.serviceAt).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : new Date(Date.now() + 86400000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}/></label><div className="modal-divider"><span>CHOOSE SONGS</span><small>{selectedSetlistSongIds.length} selected · {songs.length} available</small></div>{songs.length > 0 && <label className="search select-song-search"><Search size={17}/><input type="search" aria-label="Search catalog songs" value={setlistSongQuery} onChange={(event) => setSetlistSongQuery(event.target.value)} placeholder="Search by title, writer, or key"/></label>}<div className="select-songs">{songs.length ? filteredSetlistSongs.length ? filteredSetlistSongs.map((item) => <label key={item.id}><input type="checkbox" name="songs" value={item.id} checked={selectedSetlistSongIds.includes(item.id)} onChange={(event) => setSelectedSetlistSongIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))}/><span><b>{item.title}</b><small>{item.writer}</small></span><span className="key-pill"><span>KEY</span> {item.key}</span></label>) : <div className="empty-song-options">No songs match “{setlistSongQuery}”.</div> : <div className="empty-song-options">No songs in the catalog yet. Add songs first, then return here to choose them.</div>}</div><div className="archive-help"><Archive size={14}/> Automatically moves to archive 6 hours after service time.</div><div className="modal-footer">{draft?.id && <button type="button" className="button danger" style={{ marginRight: 'auto' }} onClick={() => setModal('confirm-delete-setlist')}><Trash2 size={14}/> Delete set list</button>}<button type="button" className="button quiet" onClick={() => { setDraft(null); setModal(''); }}>Cancel</button><button className="button dark">{draft?.id ? 'Save changes' : 'Create set list'}</button></div></form></div>}
-    {modal === 'settings' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card settings-modal"><div className="modal-head"><div><h2>Team settings</h2></div><button type="button" aria-label="Close" className="icon-button" onClick={() => setModal('')}><X size={18}/></button></div>{settingsLoading ? <p role="status">Loading team settings…</p> : settingsError ? <div role="alert"><p>Could not load team settings: {settingsError}</p><button type="button" className="button secondary" onClick={openSettings}>Try again</button></div> : <><form onSubmit={saveBrand}><label className="field">Team name<input name="name" defaultValue={brand} maxLength="80" required/></label><div className="modal-footer settings-save"><button className="button primary">Save name</button></div></form><section className="logo-settings"><div className="settings-section-title"><b>Team logo</b><span>Shown beside your team name</span></div><div className="logo-settings-row"><div className="logo-preview">{brandLogo ? <img src={brandLogo} alt="Current team logo"/> : <Music2 size={25}/>}</div><label className="button secondary logo-pick">{brandLogo ? 'Change logo' : 'Choose a logo'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadLogo}/></label>{brandLogo && <button type="button" className="button text-button" onClick={removeLogo}>Remove</button>}</div></section><section className="settings-access-link"><div><b>Team access</b><p>Add people and manage their roles.</p></div><button type="button" className="button secondary" onClick={openManageAccess}><Users size={16}/> Manage access <ChevronRight size={16}/></button></section><div className="storage-summary"><div className="storage-summary-head"><span>PHOTO STORAGE</span><b>{storage.total_megabytes} MB</b></div><div className="storage-meter"><i style={{ width: `${Math.min(100, storage.total_bytes / (1024 * 1024 * 1024) * 100)}%` }}/></div><small>{storage.page_count} song pages · {(storage.total_bytes / 1073741824).toFixed(3)} GB used</small></div></>}</div></div>}
+    {modal === 'settings' && <div className="modal-scrim" onMouseDown={(event) => event.target === event.currentTarget && setModal('')}><div className="modal-card settings-modal"><div className="modal-head"><div><h2>Team settings</h2></div><button type="button" aria-label="Close" className="icon-button" onClick={() => setModal('')}><X size={18}/></button></div>{settingsLoading ? <p role="status">Loading team settings…</p> : settingsError ? <div role="alert"><p>Could not load team settings: {settingsError}</p><button type="button" className="button secondary" onClick={openSettings}>Try again</button></div> : <><form onSubmit={saveBrand}><label className="field">Team name<input name="name" defaultValue={brand} maxLength="80" required/></label><div className="modal-footer settings-save"><button className="button primary">Save name</button></div></form><section className="logo-settings"><div className="settings-section-title"><b>Team logo</b><span>Shown beside your team name</span></div><div className="logo-settings-row"><div className="logo-preview">{brandLogo ? <img src={brandLogo} alt="Current team logo"/> : <Music2 size={25}/>}</div><label className="button secondary logo-pick">{brandLogo ? 'Change logo' : 'Choose a logo'}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={uploadLogo}/></label>{brandLogo && <button type="button" className="button text-button" onClick={removeLogo}>Remove</button>}</div></section><section className="settings-access-link"><div><b>Team access</b><p>Add people and manage their roles.</p></div><button type="button" className="button secondary" onClick={openManageAccess}><Users size={16}/> Manage access <ChevronRight size={16}/></button></section></>}</div></div>}
     {['delete', 'delete-from-editor'].includes(modal) && <div className="modal-scrim"><div className="modal-card confirm-modal"><div className="confirm-icon"><Trash2/></div><h2>Remove this song?</h2><p><b>{modal === 'delete-from-editor' ? draft?.title : song?.title}</b> will be removed from the catalog and any set lists.</p><div className="modal-footer"><button className="button quiet" onClick={() => setModal(modal === 'delete-from-editor' ? 'song' : '')}>Keep song</button><button className="button danger" onClick={() => deleteSong(modal === 'delete-from-editor' ? draft.id : song.id)}>Remove song</button></div></div></div>}
     {modal === 'confirm-delete-setlist' && <div className="modal-scrim"><div className="modal-card confirm-modal"><div className="confirm-icon"><Trash2/></div><h2>Delete this set list?</h2><p><b>{draft?.name}</b> and its selected songs will be removed.</p><div className="modal-footer"><button className="button quiet" onClick={() => setModal('setlist')}>Keep set list</button><button className="button danger" onClick={() => deleteSetlist(draft.id)}>Delete set list</button></div></div></div>}
   </div>;
@@ -752,34 +824,13 @@ function SongImportPanel({ pastedChartText, setPastedChartText, applyPastedChart
   </details>;
 }
 
-function ChoirLyrics({ text }) {
+function ChoirLyrics({ text, fontSize = 27 }) {
   const lines = normalizeWhitespaceEntities(text || 'Lyrics have not been added for this part yet.').split('\n');
   while (lines.length > 1 && !lines.at(-1).trim()) lines.pop();
-  const containerRef = useRef(null);
-  const lineRefs = useRef([]);
-  const [fontSizes, setFontSizes] = useState({});
-  useLayoutEffect(() => {
-    const fitLines = () => {
-      const width = containerRef.current?.clientWidth || 0;
-      if (!width) return;
-      const next = {};
-      lineRefs.current.forEach((line, index) => {
-        if (!line || !line.textContent.trim()) return;
-        line.style.fontSize = '27px';
-        const measured = line.scrollWidth;
-        next[index] = measured > width ? Math.max(14, Math.floor((27 * width / measured) * 10) / 10) : 27;
-      });
-      setFontSizes(next);
-    };
-    fitLines();
-    const observer = new ResizeObserver(fitLines);
-    if (containerRef.current) observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [lines.join('\n')]);
-  return <div className="choir-lyrics" ref={containerRef}>{lines.map((line, index) => <div key={`${index}-${line}`} ref={(element) => { lineRefs.current[index] = element; }} style={fontSizes[index] ? { fontSize: `${fontSizes[index]}px` } : undefined}>{line || '\u00a0'}</div>)}</div>;
+  return <div className="choir-lyrics" style={{ fontSize: `${fontSize}px` }}>{lines.map((line, index) => <div key={`${index}-${line}`}>{line || '\u00a0'}</div>)}</div>;
 }
 
-function ChordLyrics({ part }) {
+function ChordLyrics({ part, fontSize = 22 }) {
   if (!part) return null;
   const lyrics = normalizeWhitespaceEntities(part.lyrics || 'Lyrics have not been added for this part yet.').split('\n');
   while (lyrics.length > 1 && !lyrics.at(-1).trim()) lyrics.pop();
@@ -797,8 +848,8 @@ function ChordLyrics({ part }) {
     }, new Map()).values()];
     const start = offset;
     offset += chars.length + 1;
-    return <div className="aligned-line" key={`${index}-${line}`} style={{ '--lyric-columns': Math.max(chars.length, 1) }}>
-        {groupedMarks.map((mark) => <span className="aligned-chord" key={`${mark.at}-${mark.chords.join('-')}`} style={{ gridColumnStart: mark.localAt + 1 }}>{mark.chords.join(' ')}</span>)}
+    return <div className="aligned-line" key={`${index}-${line}`} style={{ '--lyric-columns': Math.max(chars.length, 1), fontSize: `${fontSize}px` }}>
+        {groupedMarks.map((mark) => <span className="aligned-chord" key={`${mark.at}-${mark.chords.join('-')}`} style={{ gridColumnStart: mark.localAt + 1, fontSize: `${Math.max(12, fontSize * 0.68)}px` }}>{mark.chords.join(' ')}</span>)}
         {chars.map((char, charIndex) => <span className="lyric-char" key={`${start + charIndex}-${char}`}>{char === ' ' ? '\u00a0' : char}</span>)}
         {!chars.length && <span className="lyric-char">{'\u00a0'}</span>}
       </div>;
