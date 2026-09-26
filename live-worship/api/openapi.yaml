@@ -188,11 +188,28 @@ paths:
       responses: { '201': { description: Setlist created } }
   /setlists/{setlistId}/state:
     get:
-      summary: Read the live song and section selection
+      summary: Read the live song, section, and guidance mode
       responses: { '200': { description: Live display state } }
     put:
       summary: Select a song part for all choir and musician displays (leader only)
+      description: Manual updates may be sent by any leader. Automatic updates must come from the leader holding the automatic guidance lease.
       responses: { '200': { description: Updated live state and revision } }
+  /setlists/{setlistId}/control:
+    patch:
+      summary: Claim or release automatic voice guidance (leader only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [control_mode]
+              properties:
+                control_mode: { type: string, enum: [manual, automatic] }
+                controller_token: { type: string, description: Stable token for the browser/device claiming automatic guidance. Required for automatic mode. }
+      responses:
+        '200': { description: Updated live guidance mode and revision }
+        '409': { description: Another leader already owns automatic guidance }
   /live:
     get:
       summary: Get the currently active service and its live state

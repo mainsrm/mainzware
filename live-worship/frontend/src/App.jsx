@@ -1,18 +1,83 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Archive, ArrowDown, ArrowUp, AudioLines, Calendar, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Guitar, House, ImagePlus, Library, ListMusic, LockKeyhole, LogOut, Moon, Music2, Pencil, Play, Search, Settings, Sparkles, Sun, Trash2, Upload, Users, X } from 'lucide-react';
+import { Archive, ArrowDown, ArrowUp, AudioLines, Calendar, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Guitar, House, ImagePlus, Library, ListMusic, LockKeyhole, LogOut, Mic, MicOff, Moon, Music2, Pencil, Play, Search, Settings, Sparkles, Sun, Trash2, Upload, Users, X } from 'lucide-react';
 import { normalizeSetlist, normalizeSong, request, send } from './api';
 
 const WHOLE_SONG = 'whole-song';
+// Keep keys in chromatic musical order from C, not lexical or key-signature order.
 const MAJOR_KEYS = ['C', 'C♯', 'D♭', 'D', 'D♯', 'E♭', 'E', 'F', 'F♯', 'G♭', 'G', 'G♯', 'A♭', 'A', 'A♯', 'B♭', 'B'];
-const MUSICAL_KEYS = [...MAJOR_KEYS, ...MAJOR_KEYS.map((key) => `${key}m`)];
+const MINOR_KEYS = MAJOR_KEYS.map((key) => `${key}m`);
+const MUSICAL_KEYS = [...MAJOR_KEYS, ...MINOR_KEYS];
 const MAINZWARE_MARK_LIGHT = `${import.meta.env.BASE_URL}img/mainzware-m-light.png`;
 const MAINZWARE_MARK_DARK = `${import.meta.env.BASE_URL}img/mainzware-m-dark.png`;
 
-function mainzWareLoginUrl() {
-  const portalOrigin = window.location.port === '5174'
-    ? `${window.location.protocol}//${window.location.hostname}:5173`
-    : window.location.origin;
-  return `${portalOrigin}/login?return=${encodeURIComponent('/live-worship/')}`;
+function normalizeKeyName(value) {
+  const key = String(value || '').trim();
+  const match = key.match(/^([A-G])([#b♯♭]?)(m?)$/);
+  if (!match) return key;
+  const accidental = match[2] === '#' || match[2] === '♯' ? '♯' : match[2] === 'b' || match[2] === '♭' ? '♭' : '';
+  return `${match[1]}${accidental}${match[3]}`;
+}
+
+function speechRecognitionConstructor() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function deviceVoiceToken() {
+  if (typeof window === 'undefined') return '';
+  const key = 'live-worship-voice-device-token';
+  let token = window.localStorage.getItem(key);
+  if (!token) {
+    token = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(key, token);
+  }
+  return token;
+}
+
+function voiceTokens(value) {
+  return String(value || '')
+    .toLocaleLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter(Boolean);
+}
+
+function voicePartScore(transcript, part) {
+  const spoken = voiceTokens(transcript).slice(-14);
+  const lyrics = voiceTokens(part?.lyrics);
+  if (spoken.length < 3 || lyrics.length < 3) return 0;
+  let longest = 0;
+  for (let spokenIndex = 0; spokenIndex < spoken.length; spokenIndex += 1) {
+    for (let lyricIndex = 0; lyricIndex < lyrics.length; lyricIndex += 1) {
+      let run = 0;
+      while (spoken[spokenIndex + run] && lyrics[lyricIndex + run] && spoken[spokenIndex + run] === lyrics[lyricIndex + run]) run += 1;
+      longest = Math.max(longest, run);
+    }
+  }
+  const required = Math.min(5, Math.max(3, Math.ceil(spoken.length * 0.35)));
+  return longest >= required ? longest / required : 0;
+}
+
+function findVoicePart(transcript, parts, currentPartId, lastPublishedPartId = null) {
+  if (!transcript || !parts?.length) return null;
+  const currentIndex = parts.findIndex((part) => part.id === currentPartId);
+  const indexes = currentIndex < 0
+    ? parts.map((_, index) => index)
+    : parts.map((_, index) => index).filter((index) => index >= Math.max(0, currentIndex - 1) && index <= currentIndex + 3);
+  const matches = indexes
+    .map((index) => ({ part: parts[index], score: voicePartScore(transcript, parts[index]), index }))
+    .filter((match) => match.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+  const lastPublishedIndex = parts.findIndex((part) => part.id === lastPublishedPartId);
+  if (lastPublishedIndex >= 0) {
+    const forwardMatch = matches
+      .filter((match) => match.index > lastPublishedIndex && match.score >= 1)
+      .sort((a, b) => a.index - b.index || b.score - a.score)[0];
+    if (forwardMatch) return forwardMatch;
+  }
+  return matches[0] || null;
 }
 
 export default function App() {
@@ -30,6 +95,9 @@ export default function App() {
   const [songReturnView, setSongReturnView] = useState('home');
   const [partId, setPartId] = useState('');
   const [highlightedPartId, setHighlightedPartId] = useState(null);
+  const [controlMode, setControlMode] = useState('manual');
+  const [voiceGuideStatus, setVoiceGuideStatus] = useState('idle');
+  const [voiceGuideMessage, setVoiceGuideMessage] = useState('');
   const [role, setRole] = useState('choir');
   const [username, setUsername] = useState('');
   const [authType, setAuthType] = useState('mainzware');
@@ -77,6 +145,15 @@ export default function App() {
   const songTopRef = useRef(null);
   const songPartRefs = useRef({});
   const livePollInitialized = useRef(false);
+  const voiceRecognitionRef = useRef(null);
+  const voiceGuideActiveRef = useRef(false);
+  const voiceRestartTimerRef = useRef(null);
+  const voiceResultsRef = useRef([]);
+  const voiceCandidateRef = useRef({ id: null, hits: 0 });
+  const voiceLastPublishedRef = useRef(null);
+  const voiceDeviceTokenRef = useRef(null);
+  const currentPartIdRef = useRef(partId);
+  currentPartIdRef.current = partId;
 
   useLayoutEffect(() => {
     const sheet = songTopRef.current;
@@ -188,8 +265,14 @@ export default function App() {
     const poll = async () => {
       try {
         const state = await request('/live');
-        if (!state) { setCurrentSetlistId(null); return; }
+        if (!state) { setCurrentSetlistId(null); setControlMode('manual'); return; }
         setCurrentSetlistId(String(state.setlist_id));
+        setControlMode(state.control_mode || 'manual');
+        if (voiceGuideActiveRef.current && state.control_mode !== 'automatic') {
+          stopVoiceGuideLocal();
+          setVoiceGuideStatus('idle');
+          setVoiceGuideMessage('Manual guidance selected on another leader device.');
+        }
         const revision = String(state.revision ?? '');
         if (!livePollInitialized.current) {
           livePollInitialized.current = true;
@@ -211,7 +294,16 @@ export default function App() {
     poll();
     const timer = setInterval(poll, 1800);
     return () => clearInterval(timer);
-  }, [authStatus, songs]);
+  }, [authStatus]);
+
+  useEffect(() => () => {
+    const wasActive = voiceGuideActiveRef.current;
+    stopVoiceGuideLocal();
+    if (wasActive) {
+      setVoiceGuideStatus('idle');
+      setVoiceGuideMessage('');
+    }
+  }, [song?.id, currentSetlistId, role]);
 
   const filtered = useMemo(() => songs.filter((item) => item.title.toLowerCase().includes(query.toLowerCase()) || (item.writer || '').toLowerCase().includes(query.toLowerCase())), [songs, query]);
   const sortedMembers = useMemo(() => {
@@ -231,6 +323,7 @@ export default function App() {
   const currentSongIndex = currentSetlist ? currentSetlist.songIds.indexOf(song?.id) : -1;
   const roleLabel = role === 'leader' ? 'Worship leader' : role === 'choir' ? 'Choir member' : 'Musician';
   const usernameInitial = username.trim().charAt(0).toUpperCase() || 'U';
+  const voiceGuideAvailable = Boolean(speechRecognitionConstructor());
 
   useEffect(() => {
     if (view !== 'song' || !song) return undefined;
@@ -251,11 +344,16 @@ export default function App() {
     const normalizedSongs = songRows.map(normalizeSong);
     setSongs(normalizedSongs); setSetlists([...activeRows, ...archivedRows].map(normalizeSetlist));
     setCurrentSetlistId(live ? String(live.setlist_id) : null);
+    setControlMode(live?.control_mode || 'manual');
     liveRevision.current = String(live?.revision ?? 0);
     livePollInitialized.current = Boolean(live);
     if (live?.song_id) {
       const currentSong = normalizedSongs.find((item) => item.id === String(live.song_id));
-      if (currentSong) { setSong(currentSong); setPartId(live.section_id || WHOLE_SONG); setHighlightedPartId(null); }
+      if (currentSong) {
+        setSong(currentSong);
+        setPartId(live.section_id || WHOLE_SONG);
+        setHighlightedPartId(live.section_id || null);
+      }
     }
     setConnectionError(''); setAuthStatus('ready');
   }
@@ -524,6 +622,159 @@ export default function App() {
       await refreshSongsAndLists(); setDraft(null); setModal(''); showNotice('Set list saved');
     } catch (error) { showNotice(error.message); }
   }
+
+  function stopVoiceGuideLocal() {
+    voiceGuideActiveRef.current = false;
+    if (voiceRestartTimerRef.current) window.clearTimeout(voiceRestartTimerRef.current);
+    voiceRestartTimerRef.current = null;
+    const recognition = voiceRecognitionRef.current;
+    voiceRecognitionRef.current = null;
+    if (recognition) {
+      recognition.onend = null;
+      try { recognition.stop(); } catch { /* already stopped */ }
+    }
+    voiceResultsRef.current = [];
+    voiceCandidateRef.current = { id: null, hits: 0 };
+    voiceLastPublishedRef.current = null;
+  }
+
+  async function stopVoiceGuide({ release = true } = {}) {
+    const setlistId = currentSetlistId;
+    stopVoiceGuideLocal();
+    setVoiceGuideStatus('idle');
+    setVoiceGuideMessage('');
+    if (release && setlistId) {
+      try {
+        const state = await request(`/setlists/${setlistId}/control`, send('PATCH', { control_mode: 'manual' }));
+        setControlMode(state?.control_mode || 'manual');
+      } catch (error) {
+        if (error.status !== 409) showNotice(error.message || 'Could not release automatic voice guidance.');
+      }
+    }
+  }
+
+  async function publishVoicePart(part, context) {
+    if (!voiceGuideActiveRef.current || !part || voiceLastPublishedRef.current === part.id) return;
+    voiceLastPublishedRef.current = part.id;
+    currentPartIdRef.current = part.id;
+    setPartId(part.id);
+    setHighlightedPartId(part.id);
+    try {
+      const state = await request(`/setlists/${context.setlistId}/state`, send('PUT', {
+        song_id: Number(context.songId), section_id: part.id, control_mode: 'automatic', controller_token: voiceDeviceTokenRef.current,
+      }));
+      setControlMode(state?.control_mode || 'automatic');
+      setVoiceGuideMessage(`Guiding: ${part.name}`);
+    } catch (error) {
+      voiceLastPublishedRef.current = null;
+      if (error.status === 409) {
+        stopVoiceGuideLocal();
+        setVoiceGuideStatus('idle');
+        setVoiceGuideMessage('Another worship leader is controlling automatic guidance.');
+      } else setVoiceGuideMessage(error.message || 'Automatic guidance could not update the service.');
+    }
+  }
+
+  async function startVoiceGuide() {
+    const Recognition = speechRecognitionConstructor();
+    if (!Recognition) {
+      setVoiceGuideStatus('unsupported');
+      setVoiceGuideMessage('Automatic voice guidance is unavailable in this browser. Use Safari or the manual part buttons.');
+      return;
+    }
+    if (role !== 'leader' || !song || !currentSetlistId) {
+      showNotice('Start the live service and open its song before enabling voice guidance.');
+      return;
+    }
+    voiceDeviceTokenRef.current = deviceVoiceToken();
+    try {
+      const state = await request(`/setlists/${currentSetlistId}/control`, send('PATCH', { control_mode: 'automatic', controller_token: voiceDeviceTokenRef.current }));
+      setControlMode(state?.control_mode || 'automatic');
+    } catch (error) {
+      setVoiceGuideStatus('error');
+      setVoiceGuideMessage(error.message || 'Another worship leader may already be running automatic guidance.');
+      return;
+    }
+
+    stopVoiceGuideLocal();
+    const context = { songId: song.id, setlistId: currentSetlistId, parts: song.parts };
+    voiceGuideActiveRef.current = true;
+    setVoiceGuideStatus('listening');
+    setVoiceGuideMessage('Listening for the current lyric section…');
+
+    // Safari and iPadOS can end a speech session after silence and reject a
+    // second start() on the old object. Always create a fresh session when
+    // restarting instead of leaving the UI stuck in a false listening state.
+    const scheduleRecognitionRestart = (delay = 350) => {
+      if (!voiceGuideActiveRef.current || voiceRestartTimerRef.current) return;
+      voiceRestartTimerRef.current = window.setTimeout(() => {
+        voiceRestartTimerRef.current = null;
+        startRecognitionSession();
+      }, delay);
+    };
+    const startRecognitionSession = () => {
+      if (!voiceGuideActiveRef.current) return;
+      const recognition = new Recognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+      recognition.lang = navigator.language || 'en-US';
+      voiceRecognitionRef.current = recognition;
+      voiceResultsRef.current = [];
+      voiceCandidateRef.current = { id: null, hits: 0 };
+      recognition.onresult = (event) => {
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          voiceResultsRef.current[index] = event.results[index][0]?.transcript || '';
+        }
+        const transcript = voiceResultsRef.current.slice(-3).join(' ');
+        const match = findVoicePart(transcript, context.parts, currentPartIdRef.current, voiceLastPublishedRef.current);
+        if (!match) return;
+        const candidate = voiceCandidateRef.current;
+        if (candidate.id === match.part.id) candidate.hits += 1;
+        else voiceCandidateRef.current = { id: match.part.id, hits: 1 };
+        setVoiceGuideMessage(`Heard: ${transcript.trim().split(/\s+/).slice(-8).join(' ')} · match: ${match.part.name}`);
+        const spokenWordCount = voiceTokens(transcript).length;
+        const strongMatch = match.score >= 1.2 || (spokenWordCount >= 5 && match.score >= 1);
+        if (voiceGuideActiveRef.current && (strongMatch || candidate.hits >= 2)) {
+          publishVoicePart(match.part, context);
+        }
+      };
+      recognition.onerror = (event) => {
+        if (!voiceGuideActiveRef.current) return;
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          stopVoiceGuideLocal();
+          setVoiceGuideStatus('error');
+          setVoiceGuideMessage('Microphone or speech recognition permission was denied.');
+        } else if (event.error === 'audio-capture') {
+          setVoiceGuideMessage('Microphone input stopped; trying to reconnect…');
+        } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+          setVoiceGuideMessage('Voice recognition paused; trying to reconnect…');
+        }
+        if (event.error !== 'not-allowed' && event.error !== 'service-not-allowed') scheduleRecognitionRestart(700);
+      };
+      recognition.onstart = () => {
+        if (voiceGuideActiveRef.current) setVoiceGuideStatus('listening');
+      };
+      recognition.onend = () => {
+        if (!voiceGuideActiveRef.current || voiceRecognitionRef.current !== recognition) return;
+        scheduleRecognitionRestart();
+      };
+      try {
+        recognition.start();
+      } catch (error) {
+        if (!voiceGuideActiveRef.current) return;
+        setVoiceGuideMessage('Microphone session is restarting…');
+        scheduleRecognitionRestart(700);
+      }
+    };
+    startRecognitionSession();
+  }
+
+  function toggleVoiceGuide() {
+    if (voiceGuideStatus === 'listening') stopVoiceGuide();
+    else startVoiceGuide();
+  }
+
   async function deleteSetlist(id) {
     try {
       await request(`/setlists/${id}`, { method: 'DELETE' });
@@ -533,23 +784,37 @@ export default function App() {
     } catch (error) { showNotice(error.message); }
   }
   async function startService(item) {
+    const first = item.songs[0];
+    if (!first) {
+      showNotice('Add at least one song to this set list before opening the service.');
+      return;
+    }
     setCurrentSetlistId(item.id);
     if (role === 'leader') {
       try { await request(`/setlists/${item.id}/start`, { method: 'POST' }); }
       catch (error) { showNotice(error.message); return; }
     }
-    const first = item.songs[0];
-    if (first && role === 'leader') {
-      try { await request(`/setlists/${item.id}/state`, send('PUT', { song_id: Number(first.id), section_id: null })); }
+    if (role === 'leader') {
+      try { await request(`/setlists/${item.id}/state`, send('PUT', { song_id: Number(first.id), section_id: null, control_mode: 'manual' })); }
       catch (error) { showNotice(error.message); }
     }
     if (first) openSong(first);
   }
   async function selectPart(id) {
+    if (voiceGuideActiveRef.current) stopVoiceGuideLocal();
+    if (voiceGuideStatus === 'listening') {
+      setVoiceGuideStatus('idle');
+      setVoiceGuideMessage('Manual guidance selected.');
+    }
     setPartId(id);
     setHighlightedPartId(id === WHOLE_SONG ? null : id);
     if (role !== 'leader' || !currentSetlistId || !song) return;
-    try { await request(`/setlists/${currentSetlistId}/state`, send('PUT', { song_id: Number(song.id), section_id: id === WHOLE_SONG ? null : id })); }
+    try {
+      const state = await request(`/setlists/${currentSetlistId}/state`, send('PUT', {
+        song_id: Number(song.id), section_id: id === WHOLE_SONG ? null : id, control_mode: 'manual',
+      }));
+      setControlMode(state?.control_mode || 'manual');
+    }
     catch (error) { showNotice(error.message); }
   }
   async function selectSetlistSong(index) {
@@ -557,7 +822,7 @@ export default function App() {
     if (!next) return;
     openSong(next);
     if (role === 'leader') {
-      try { await request(`/setlists/${currentSetlist.id}/state`, send('PUT', { song_id: Number(next.id), section_id: null })); }
+      try { await request(`/setlists/${currentSetlist.id}/state`, send('PUT', { song_id: Number(next.id), section_id: null, control_mode: 'manual' })); }
       catch (error) { showNotice(error.message); }
     }
   }
@@ -612,15 +877,6 @@ export default function App() {
     } finally { setLoading(false); }
   }
 
-  async function continueWithMainzWare() {
-    setLoginError(''); setLoading(true);
-    try { await request('/auth/mainzware', send('POST', {})); await refreshApp(); setView('home'); setSong(null); }
-    catch (error) {
-      setLoginError(error.status === 401 ? 'Sign in to MainzWare first, then return to Live Worship.' : error.message || 'Could not use your MainzWare session.');
-      setAuthStatus('sign-in');
-    } finally { setLoading(false); }
-  }
-
   async function signOutLiveWorship() {
     try {
       await request('/auth/logout', send('POST', {}));
@@ -647,7 +903,7 @@ export default function App() {
     return <div className="profile-menu" ref={menuRef}><button type="button" className="profile-menu-trigger" aria-label={`Profile menu for ${username}, ${roleLabel}`} aria-expanded={profileMenuOpen} aria-haspopup="menu" onClick={() => setProfileMenuOpen((open) => !open)} title={`${username} · ${roleLabel}`}><span className="profile-initial" aria-hidden="true">{usernameInitial}</span><span className="profile-menu-copy"><b>{username}</b><small>{roleLabel}</small></span></button>{profileMenuOpen && <div className="profile-menu-panel" role="menu"><div className="profile-menu-identity"><b>{username}</b><small>{roleLabel}</small></div><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setModal('account-password'); }}><LockKeyhole size={15}/> Change password</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); changeTheme(darkMode ? 'light' : 'dark'); }}>{darkMode ? <Sun size={15}/> : <Moon size={15}/>} Turn {darkMode ? 'light' : 'dark'} mode on</button><button type="button" role="menuitem" className="profile-menu-logout" onClick={signOutLiveWorship}><LogOut size={15}/> Log out</button></div>}</div>;
   }
 
-  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Ask a worship leader for access' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'sign-in' ? 'Use the Live Worship account your worship leader gave you, or continue with your MainzWare account.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Ask a worship leader to add it.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button><div className="login-divider"><span>OR</span></div><button className="button quiet" type="button" onClick={continueWithMainzWare} disabled={loading}>Continue with MainzWare</button><a href={mainzWareLoginUrl()}>Sign in to MainzWare</a></form>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
+  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Ask a worship leader for access' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'sign-in' ? 'Use the Live Worship account your worship leader gave you.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Ask a worship leader to add it.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button></form>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
 
   return <div className={`app-frame ${view === 'song' ? 'is-song-view' : ''}`}>
     <aside className="sidebar">
@@ -704,14 +960,15 @@ export default function App() {
       {view === 'song' && song && <>
         <button className="back-link" onClick={returnFromSong}><ChevronLeft size={16}/> {songReturnView === 'setlists' ? 'Back to set lists' : songReturnView === 'catalog' ? 'Back to catalog' : 'Back to services'}</button>
         <div className="song-view-head">
-          <div><div className="eyebrow">NOW SINGING <span className="live-tag"><i/> LIVE</span></div><h1>{song.title}</h1><div className="song-key-metadata"><p>{song.writer || 'Writer not listed'}{song.original_key && <> <span className="middot">·</span> Original key <b>{song.original_key}</b></>}</p>{role === 'leader' && <label className="song-key-control">{song.key ? 'Transpose to' : 'Set key'}<select aria-label="Song key" value={song.key || ''} disabled={savingKey} onChange={(event) => changeSongKey(event.target.value)}><option value="" disabled>Select key</option>{song.key && !MUSICAL_KEYS.includes(song.key) && <option value={song.key}>{song.key}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select>{savingKey && <small role="status">Saving…</small>}</label>}</div></div>
+          <div><div className="eyebrow">NOW SINGING <span className="live-tag"><i/> LIVE</span></div><h1>{song.title}</h1><div className="song-key-metadata"><p>{song.writer || 'Writer not listed'}{song.original_key && <> <span className="middot">·</span> Original key <b>{song.original_key}</b></>}</p>{role === 'leader' && <label className="song-key-control">{song.key ? 'Transpose to' : 'Set key'}<select aria-label="Song key" value={normalizeKeyName(song.key)} disabled={savingKey} onChange={(event) => changeSongKey(event.target.value)}><option value="" disabled>Select key</option>{song.key && !MUSICAL_KEYS.includes(normalizeKeyName(song.key)) && <option value={normalizeKeyName(song.key)}>{normalizeKeyName(song.key)}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select>{savingKey && <small role="status">Saving…</small>}</label>}</div></div>
           <div className="song-head-actions">
+            {role === 'leader' && currentSetlist && <button className={`button ${voiceGuideStatus === 'listening' ? 'voice-guide-active' : 'quiet'}`} onClick={toggleVoiceGuide} title={voiceGuideAvailable ? 'Use this iPad microphone for automatic lyric guidance' : 'Automatic voice guidance is unavailable in this browser'}>{voiceGuideStatus === 'listening' ? <MicOff size={15}/> : <Mic size={15}/>} {voiceGuideStatus === 'listening' ? 'Stop voice guide' : 'Voice guide'}</button>}
             {role === 'leader' && <button className="button quiet" disabled={savingKey} onClick={() => editSong(song)}><Pencil size={15}/> Edit song</button>}
           </div>
         </div>
         <div className="song-workspace">
           <section className="lyrics-panel">
-            <div className="lyrics-toolbar"><div><small>SONG PARTS</small><span>{role === 'leader' ? 'Tap a part to guide everyone' : 'Following the worship leader'}</span></div>{role === 'leader' && <div className="view-mode-control"><span>View as:</span><div className="mode-toggle"><button aria-pressed={mode === 'choir'} className={mode === 'choir' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('choir')}><Users size={14}/> Choir</button><button aria-pressed={mode === 'musician'} className={mode === 'musician' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('musician')}><Guitar size={14}/> Musician</button></div></div>}{role !== 'leader' && <span className="following"><i/> Leader is guiding</span>}</div>
+            <div className="lyrics-toolbar"><div><small>SONG PARTS</small><span>{role === 'leader' ? controlMode === 'automatic' ? voiceGuideStatus === 'listening' ? 'This iPad is listening and guiding everyone' : 'Another leader is running automatic guidance' : 'Any worship leader can guide manually' : 'Following the worship leaders'}</span>{role === 'leader' && voiceGuideMessage && <small className={`voice-guide-message ${voiceGuideStatus === 'error' || voiceGuideStatus === 'unsupported' ? 'is-error' : ''}`}>{voiceGuideMessage}</small>}</div>{role === 'leader' && <div className="view-mode-control"><span>View as:</span><div className="mode-toggle"><button aria-pressed={mode === 'choir'} className={mode === 'choir' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('choir')}><Users size={14}/> Choir</button><button aria-pressed={mode === 'musician'} className={mode === 'musician' ? 'selected' : ''} disabled={savingMode} onClick={() => changeViewMode('musician')}><Guitar size={14}/> Musician</button></div></div>}{role !== 'leader' && <span className="following"><i/> Leaders are guiding</span>}</div>
             <div className="song-controls">
             <div className="part-tabs"><button className={`${showWholeSong ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} onClick={() => role === 'leader' && selectPart(WHOLE_SONG)}>Top{showWholeSong && role !== 'leader' && <i/>}</button>{song.parts.map((part) => <button className={`${partId === part.id ? 'current' : ''} ${role === 'leader' ? '' : 'follower'}`} key={part.id} onClick={() => role === 'leader' && selectPart(part.id)}>{displayPartName(part.name)}{partId === part.id && role !== 'leader' && <i/>}</button>)}</div>
             {role === 'leader' && currentSetlist && currentSongIndex >= 0 && <div className="setlist-stepper"><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex - 1)} disabled={currentSongIndex === 0} aria-label="Previous set list song"><ChevronLeft size={16}/></button><span>Song {currentSongIndex + 1} of {currentSetlist.songs.length}</span><button className="icon-button" onClick={() => selectSetlistSong(currentSongIndex + 1)} disabled={currentSongIndex >= currentSetlist.songs.length - 1} aria-label="Next set list song"><ChevronRight size={16}/></button></div>}
@@ -763,7 +1020,7 @@ export default function App() {
           <div className="modal-footer"><button type="button" className="button quiet" onClick={() => setModal('')}>Cancel</button></div>
         </> : <>
           <p className="intake-intro">{songEditorMode === 'chordpro' ? 'Edit the song in ChordPro. Put chords in brackets before the lyric word where they begin, and use section directives to organize the song.' : 'Review the lyrics and section names. Switch to ChordPro if you want to add or edit chords.'}</p>
-          <div className="form-grid"><label className="field wide">Song title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Song title"/></label><label className="field">Writer / author<input value={draft.writer || ''} onChange={(event) => setDraft({ ...draft, writer: event.target.value })} placeholder="Writer or author, if known"/></label><label className="field">{draft.id ? 'Transpose to key (on save)' : 'Original key'}<select value={draft.key || ''} onChange={(event) => setDraft({ ...draft, key: event.target.value })}><option value="">Select key</option>{draft.key && !MUSICAL_KEYS.includes(draft.key) && <option value={draft.key}>{draft.key}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select></label></div>
+          <div className="form-grid"><label className="field wide">Song title<input required value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} placeholder="Song title"/></label><label className="field">Writer / author<input value={draft.writer || ''} onChange={(event) => setDraft({ ...draft, writer: event.target.value })} placeholder="Writer or author, if known"/></label><label className="field">{draft.id ? 'Transpose to key (on save)' : 'Original key'}<select value={normalizeKeyName(draft.key)} onChange={(event) => setDraft({ ...draft, key: event.target.value })}><option value="">Select key</option>{draft.key && !MUSICAL_KEYS.includes(normalizeKeyName(draft.key)) && <option value={normalizeKeyName(draft.key)}>{normalizeKeyName(draft.key)}</option>}{MUSICAL_KEYS.map((key) => <option key={key} value={key}>{key}</option>)}</select></label></div>
           {songSource !== 'manual' && <div className="review-photo-row"><span>{draft.pages?.length ? `${draft.pages.length} paper page${draft.pages.length === 1 ? '' : 's'} attached` : 'No paper pages attached'}</span><button className="button quiet small" type="button" onClick={() => setSongStep('photos')}><ImagePlus size={15}/> Review photos</button></div>}
           <div className="ocr-note"><Sparkles size={16}/><span><b>{songEditorMode === 'chordpro' ? 'ChordPro song editor' : ocrStatus === 'done' ? 'Review lyrics and section labels' : 'Review song details'}</b><small>{songEditorMode === 'chordpro' ? 'ChordPro is an editing format; the catalog saves plain lyrics by named song section and keeps chord positions alongside them.' : 'Check the lyrics and section labels, then add the song title, writer, and key before saving.'}</small></span></div>
           <div className="song-editor-toolbar"><div className="editor-mode-toggle"><button type="button" className={songEditorMode === 'chordpro' ? 'selected' : ''} onClick={() => changeSongEditorMode('chordpro')}>ChordPro</button><button type="button" className={songEditorMode === 'sections' ? 'selected' : ''} onClick={() => changeSongEditorMode('sections')}>Song parts</button></div>{songEditorMode === 'sections' && <button className="button quiet small" type="button" onClick={addPart}><CirclePlus size={14}/> Add song part</button>}</div>
@@ -835,8 +1092,10 @@ function ChordLyrics({ part, fontSize = 22 }) {
   const lyrics = normalizeWhitespaceEntities(part.lyrics || 'Lyrics have not been added for this part yet.').split('\n');
   while (lyrics.length > 1 && !lyrics.at(-1).trim()) lyrics.pop();
   const marks = part.chord_marks || [];
+  const legacyChords = String(part.chords || '').trim();
   let offset = 0;
   return <div className="chord-score">
+    {!marks.length && legacyChords && <div className="legacy-chord-notes" aria-label="Chord notes">{legacyChords}</div>}
     {lyrics.map((line, index) => {
     const chars = Array.from(line);
     const lineMarks = marks.filter((mark) => mark.at >= offset && mark.at <= offset + chars.length).map((mark) => ({ ...mark, localAt: mark.at - offset }));
@@ -854,7 +1113,7 @@ function ChordLyrics({ part, fontSize = 22 }) {
         {!chars.length && <span className="lyric-char">{'\u00a0'}</span>}
       </div>;
     })}
-    {!marks.length && <div className="chord-alignment-note">{part.chords ? 'These older chord notes have no saved lyric positions yet. A worship leader can place them in Edit song.' : 'No chords have been placed over these lyrics yet.'}</div>}
+    {!marks.length && <div className="chord-alignment-note">{legacyChords ? 'These chord notes are not aligned to lyric positions yet. A worship leader can place them in Edit song.' : 'No chords have been placed over these lyrics yet.'}</div>}
   </div>;
 }
 
@@ -1640,5 +1899,5 @@ async function jpegForUpload(file) {
 
 function ServiceCard({ item, songs, archived = false, onStart, onEdit }) {
   const songItems = item.songIds.map((id) => songs.find((song) => song.id === id)).filter(Boolean);
-  return <article className="service-card"><div className="service-card-top"><span className="service-date-icon"><ListMusic size={18}/></span><span className={archived ? 'status-archived' : 'status-upcoming'}>{archived ? 'ARCHIVED' : item.current ? 'IN PROGRESS' : 'UPCOMING'}</span>{onEdit && <button className="icon-button" onClick={onEdit} disabled={archived}><Pencil size={15}/></button>}</div><h3>{item.name}</h3><p>{new Date(item.serviceAt).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><div className="service-songs">{songItems.length ? songItems.map((song, i) => <div key={song.id}><span>{String(i + 1).padStart(2, '0')}</span>{song.title}<small>KEY {song.key || '—'}</small></div>) : <span className="no-songs">No songs selected</span>}</div>{!archived && <div className="service-card-footer"><span>{songItems.length} songs <span>·</span> archives 6 hours after service</span><button className="button dark small" onClick={onStart}><Play size={14}/> Open service</button></div>}</article>;
+  return <article className="service-card"><div className="service-card-top"><span className="service-date-icon"><ListMusic size={18}/></span><span className={archived ? 'status-archived' : 'status-upcoming'}>{archived ? 'ARCHIVED' : item.current ? 'IN PROGRESS' : 'UPCOMING'}</span>{onEdit && <button className="icon-button" onClick={onEdit} disabled={archived}><Pencil size={15}/></button>}</div><h3>{item.name}</h3><p>{new Date(item.serviceAt).toLocaleString([], { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</p><div className="service-songs">{songItems.length ? songItems.map((song, i) => <div key={song.id}><span>{String(i + 1).padStart(2, '0')}</span>{song.title}<small>KEY {song.key || '—'}</small></div>) : <span className="no-songs">No songs selected</span>}</div>{!archived && <div className="service-card-footer"><span>{songItems.length} songs <span>·</span> archives 6 hours after service</span><button className="button dark small" onClick={onStart} disabled={!songItems.length}><Play size={14}/> {songItems.length ? 'Open service' : 'Add songs first'}</button></div>}</article>;
 }

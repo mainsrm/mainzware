@@ -132,6 +132,7 @@ final class Api
         if ($method === 'DELETE' && preg_match('#^/setlists/(\d+)$#', $path, $m)) { $this->deleteSetlist((int) $m[1]); return; }
         if ($method === 'POST' && preg_match('#^/setlists/(\d+)/start$#', $path, $m)) { $this->startSetlist((int) $m[1]); return; }
         if ($method === 'GET' && preg_match('#^/setlists/(\d+)/state$#', $path, $m)) { $this->liveState((int) $m[1]); return; }
+        if ($method === 'PATCH' && preg_match('#^/setlists/(\d+)/control$#', $path, $m)) { $this->updateControlMode((int) $m[1]); return; }
         if ($method === 'PUT' && preg_match('#^/setlists/(\d+)/state$#', $path, $m)) { $this->updateLiveState((int) $m[1]); return; }
         http_response_code(404);
         echo json_encode(['error' => 'Live Worship endpoint not found.']);
@@ -268,13 +269,15 @@ final class Api
         $this->archiveExpired();
         $this->db->exec("UPDATE live_worship.live_state st SET is_live=FALSE, revision=revision+1, updated_at=now() FROM live_worship.setlists sl WHERE st.setlist_id=sl.id AND st.is_live=TRUE AND sl.status='archived'");
         $row = $this->db->query(
-            "SELECT l.setlist_id, s.name AS setlist_name, l.song_id, l.section_id, l.revision, l.updated_at
+            "SELECT l.setlist_id, s.name AS setlist_name, l.song_id, l.section_id,
+                    l.control_mode, l.controller_member_id, l.revision, l.updated_at
                FROM live_worship.live_state l JOIN live_worship.setlists s ON s.id=l.setlist_id
               WHERE l.is_live=TRUE AND s.status='active' LIMIT 1"
         )->fetch();
         if (!$row) { $this->respond(null); return; }
         $row['setlist_id'] = (int) $row['setlist_id'];
         $row['song_id'] = $row['song_id'] === null ? null : (int) $row['song_id'];
+        $row['controller_member_id'] = $row['controller_member_id'] === null ? null : (int) $row['controller_member_id'];
         $row['revision'] = (int) $row['revision'];
         $this->respond($row);
     }
@@ -576,7 +579,10 @@ final class Api
         if ($setlist['status'] !== 'active') throw new ApiError(409, 'Archived services cannot be started.');
         $this->db->beginTransaction();
         $this->db->exec('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE');
-        $stmt = $this->db->prepare('UPDATE live_worship.live_state SET is_live=TRUE, revision=revision+1, updated_at=now() WHERE setlist_id=:id');
+        $stmt = $this->db->prepare("UPDATE live_worship.live_state
+                                      SET is_live=TRUE, control_mode='manual', controller_member_id=NULL, controller_token=NULL,
+                                          revision=revision+1, updated_at=now()
+                                    WHERE setlist_id=:id");
         $stmt->execute(['id' => $id]);
         $this->db->commit();
         $this->respond($this->setlistData($id));
@@ -585,11 +591,57 @@ final class Api
     private function liveState(int $setlistId): void
     {
         $this->setlistData($setlistId);
-        $stmt = $this->db->prepare('SELECT setlist_id, song_id, section_id, revision, updated_at FROM live_worship.live_state WHERE setlist_id=:id');
+        $stmt = $this->db->prepare('SELECT setlist_id, song_id, section_id, control_mode, controller_member_id, revision, updated_at FROM live_worship.live_state WHERE setlist_id=:id');
         $stmt->execute(['id' => $setlistId]);
         $state = $stmt->fetch();
-        if ($state) { $state['setlist_id'] = (int) $state['setlist_id']; $state['song_id'] = $state['song_id'] === null ? null : (int) $state['song_id']; $state['revision'] = (int) $state['revision']; }
+        if ($state) {
+            $state['setlist_id'] = (int) $state['setlist_id'];
+            $state['song_id'] = $state['song_id'] === null ? null : (int) $state['song_id'];
+            $state['controller_member_id'] = $state['controller_member_id'] === null ? null : (int) $state['controller_member_id'];
+            $state['revision'] = (int) $state['revision'];
+        }
         $this->respond($state);
+    }
+
+    private function updateControlMode(int $setlistId): void
+    {
+        Access::leader($this->member);
+        $setlist = $this->setlistData($setlistId);
+        if ($setlist['status'] !== 'active') throw new ApiError(409, 'Archived services cannot be controlled live.');
+        $body = $this->body();
+        $mode = (string) ($body['control_mode'] ?? '');
+        $token = trim((string) ($body['controller_token'] ?? ''));
+        if (!in_array($mode, ['manual', 'automatic'], true)) throw new ApiError(400, 'Choose manual or automatic live guidance.');
+        if ($mode === 'automatic' && $token === '') throw new ApiError(400, 'A device token is required for automatic live guidance.');
+
+        $this->db->beginTransaction();
+        try {
+            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id FOR UPDATE');
+            $lock->execute(['id' => $setlistId]);
+            $current = $lock->fetch();
+            if (!$current) throw new ApiError(409, 'Start this service before enabling live guidance.');
+            $owner = $current['controller_member_id'] === null ? null : (int) $current['controller_member_id'];
+            $currentToken = $current['controller_token'] === null ? null : (string) $current['controller_token'];
+            if ($mode === 'automatic' && (($owner !== null && $owner !== (int) $this->member['id']) || ($currentToken !== null && !hash_equals($currentToken, $token)))) {
+                throw new ApiError(409, 'Another worship leader is already running automatic voice guidance.');
+            }
+            $controller = $mode === 'automatic' ? (int) $this->member['id'] : null;
+            $controllerToken = $mode === 'automatic' ? $token : null;
+            if ((string) $current['control_mode'] !== $mode || $owner !== $controller || $currentToken !== $controllerToken) {
+                $update = $this->db->prepare(
+                    'UPDATE live_worship.live_state
+                        SET control_mode=:mode, controller_member_id=:controller, controller_token=:token,
+                            revision=revision+1, updated_at=now()
+                      WHERE setlist_id=:id'
+                );
+                $update->execute(['mode' => $mode, 'controller' => $controller, 'token' => $controllerToken, 'id' => $setlistId]);
+            }
+            $this->db->commit();
+        } catch (Throwable $error) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $error;
+        }
+        $this->liveState($setlistId);
     }
 
     private function updateLiveState(int $setlistId): void
@@ -600,6 +652,12 @@ final class Api
         $body = $this->body();
         $songId = isset($body['song_id']) ? (int) $body['song_id'] : null;
         $sectionId = isset($body['section_id']) ? (string) $body['section_id'] : null;
+        $requestedMode = array_key_exists('control_mode', $body) ? (string) $body['control_mode'] : null;
+        $requestedToken = trim((string) ($body['controller_token'] ?? ''));
+        if ($requestedMode !== null && !in_array($requestedMode, ['manual', 'automatic'], true)) {
+            throw new ApiError(400, 'Choose manual or automatic live guidance.');
+        }
+        if ($requestedMode === 'automatic' && $requestedToken === '') throw new ApiError(400, 'A device token is required for automatic live guidance.');
         if ($songId !== null) {
             $song = $this->songData($songId);
             if (!in_array($songId, array_column($setlist['songs'], 'id'), true)) throw new ApiError(400, 'Choose a song from this set list.');
@@ -607,21 +665,43 @@ final class Api
         } else { $sectionId = null; }
         $this->db->beginTransaction();
         try {
+            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id FOR UPDATE');
+            $lock->execute(['id' => $setlistId]);
+            $current = $lock->fetch();
+            $currentMode = $current ? (string) $current['control_mode'] : 'manual';
+            $currentOwner = $current && $current['controller_member_id'] !== null ? (int) $current['controller_member_id'] : null;
+            $currentToken = $current && $current['controller_token'] !== null ? (string) $current['controller_token'] : null;
+            $mode = $requestedMode ?? $currentMode;
+            if ($mode === 'automatic' && (($currentOwner !== null && $currentOwner !== (int) $this->member['id']) || ($currentToken !== null && !hash_equals($currentToken, $requestedToken)))) {
+                throw new ApiError(409, 'Another worship leader is already running automatic voice guidance.');
+            }
+            if ($mode === 'automatic' && $requestedToken === '') throw new ApiError(400, 'A device token is required for automatic live guidance.');
+            $controller = $mode === 'automatic' ? ($currentOwner ?? (int) $this->member['id']) : null;
+            $controllerToken = $mode === 'automatic' ? ($currentToken ?? $requestedToken) : null;
             $otherLive = $this->db->prepare('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE AND setlist_id<>:id');
             $otherLive->execute(['id' => $setlistId]);
             $stmt = $this->db->prepare(
-                'INSERT INTO live_worship.live_state (setlist_id, song_id, section_id, is_live) VALUES (:setlist, :song, :section, TRUE)
+                'INSERT INTO live_worship.live_state (setlist_id, song_id, section_id, control_mode, controller_member_id, controller_token, is_live) VALUES (:setlist, :song, :section, :mode, :controller, :token, TRUE)
                  ON CONFLICT (setlist_id) DO UPDATE SET song_id=EXCLUDED.song_id, section_id=EXCLUDED.section_id,
+                 control_mode=EXCLUDED.control_mode, controller_member_id=EXCLUDED.controller_member_id, controller_token=EXCLUDED.controller_token,
                  is_live=TRUE, revision=live_worship.live_state.revision + 1, updated_at=now()
-                 WHERE live_worship.live_state.song_id IS DISTINCT FROM EXCLUDED.song_id OR live_worship.live_state.section_id IS DISTINCT FROM EXCLUDED.section_id OR live_worship.live_state.is_live=FALSE
-                 RETURNING setlist_id, song_id, section_id, revision, updated_at'
+                 WHERE live_worship.live_state.song_id IS DISTINCT FROM EXCLUDED.song_id
+                    OR live_worship.live_state.section_id IS DISTINCT FROM EXCLUDED.section_id
+                    OR live_worship.live_state.control_mode IS DISTINCT FROM EXCLUDED.control_mode
+                    OR live_worship.live_state.controller_member_id IS DISTINCT FROM EXCLUDED.controller_member_id
+                    OR live_worship.live_state.controller_token IS DISTINCT FROM EXCLUDED.controller_token
+                    OR live_worship.live_state.is_live=FALSE
+                 RETURNING setlist_id, song_id, section_id, control_mode, controller_member_id, revision, updated_at'
             );
-            $stmt->execute(['setlist' => $setlistId, 'song' => $songId, 'section' => $sectionId]);
+            $stmt->execute(['setlist' => $setlistId, 'song' => $songId, 'section' => $sectionId, 'mode' => $mode, 'controller' => $controller, 'token' => $controllerToken]);
             $state = $stmt->fetch();
             $this->db->commit();
         } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
         if (!$state) { $this->liveState($setlistId); return; }
-        $state['setlist_id'] = (int) $state['setlist_id']; $state['song_id'] = $state['song_id'] === null ? null : (int) $state['song_id']; $state['revision'] = (int) $state['revision'];
+        $state['setlist_id'] = (int) $state['setlist_id'];
+        $state['song_id'] = $state['song_id'] === null ? null : (int) $state['song_id'];
+        $state['controller_member_id'] = $state['controller_member_id'] === null ? null : (int) $state['controller_member_id'];
+        $state['revision'] = (int) $state['revision'];
         $this->respond($state);
     }
 
@@ -632,13 +712,32 @@ final class Api
         $song = $stmt->fetch();
         if (!$song) throw new ApiError(404, 'Song not found.');
         $song['id'] = (int) $song['id'];
-        $song['sections'] = json_decode($song['sections'], true, 512, JSON_THROW_ON_ERROR) ?: [];
+        $song['sections'] = $this->normalizeChordPositions(json_decode($song['sections'], true, 512, JSON_THROW_ON_ERROR) ?: []);
         $pages = $this->db->prepare('SELECT id, page_number, mime_type, file_size_bytes FROM live_worship.song_pages WHERE song_id=:id ORDER BY page_number');
         $pages->execute(['id' => $id]);
         $song['pages'] = array_map(static function (array $page): array {
             return ['id' => (int) $page['id'], 'number' => (int) $page['page_number'], 'mime_type' => $page['mime_type'], 'file_size_bytes' => (int) $page['file_size_bytes'], 'url' => '/api/v1/live-worship/song-pages/' . (int) $page['id']];
         }, $pages->fetchAll());
         return $song;
+    }
+
+    /**
+     * Older imports can contain chord offsets measured against the source
+     * chart rather than the cleaned lyric text. Keep those chords renderable
+     * and make them safe to submit through the song update endpoint.
+     */
+    private function normalizeChordPositions(array $sections): array
+    {
+        foreach ($sections as &$section) {
+            if (!is_array($section)) continue;
+            $maxAt = mb_strlen((string) ($section['lyrics'] ?? ''));
+            foreach ($section['chord_marks'] ?? [] as $index => $mark) {
+                if (!is_array($mark) || !array_key_exists('at', $mark)) continue;
+                $section['chord_marks'][$index]['at'] = max(0, min((int) $mark['at'], $maxAt));
+            }
+        }
+        unset($section);
+        return $sections;
     }
 
     private function setlistData(int $id): array
@@ -675,8 +774,8 @@ final class Api
                 if (!is_array($mark) || filter_var($mark['at'] ?? null, FILTER_VALIDATE_INT) === false) throw new ApiError(400, 'Each chord needs a lyric position.');
                 $at = (int) $mark['at'];
                 $chord = trim((string) ($mark['chord'] ?? ''));
-                if ($at < 0 || $at > mb_strlen($section['lyrics']) || $chord === '' || mb_strlen($chord) > 16) throw new ApiError(400, 'Check the chord names and their lyric positions.');
-                $section['chord_marks'][] = ['at' => $at, 'chord' => $chord];
+                if ($chord === '' || mb_strlen($chord) > 16) throw new ApiError(400, 'Check the chord names and their lyric positions.');
+                $section['chord_marks'][] = ['at' => max(0, min($at, mb_strlen($section['lyrics']))), 'chord' => $chord];
             }
             usort($section['chord_marks'], static fn(array $a, array $b): int => $a['at'] <=> $b['at']);
             if ($section['name'] === '' || mb_strlen($section['name']) > 80) throw new ApiError(400, 'Each song part needs a name up to 80 characters.');

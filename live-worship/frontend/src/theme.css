@@ -237,6 +237,8 @@ html[data-theme="dark"] .source-panel,
 html[data-theme="dark"] .lyric-sheet,
 html[data-theme="dark"] .is-song-view .lyrics-toolbar,
 html[data-theme="dark"] .is-song-view .part-tabs { background: #111b29; }
+html[data-theme="dark"] .voice-guide-message { color: #9db4e7 !important; }
+html[data-theme="dark"] .voice-guide-message.is-error { color: #f0a7a3 !important; }
 html[data-theme="dark"] .account-menu-trigger,
 html[data-theme="dark"] .account-menu-panel { background: #182231; border-color: #2b394c; color: #e2e8f0; }
 html[data-theme="dark"] .main-footer,
@@ -506,6 +508,10 @@ html[data-theme="dark"] .login-error { color: #ffb5ad; }
 .song-view-head { align-items: center; gap: 18px; }
 .song-view-head > div:first-child { min-width: 0; }
 .song-head-actions { flex-wrap: wrap; justify-content: flex-end; gap: 64px; }
+.voice-guide-active { color: #fff; background: #2f559d; border-color: #2f559d; }
+.voice-guide-active:hover { background: #24447e; }
+.voice-guide-message { display: block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #4264b2 !important; font-size: 11px !important; }
+.voice-guide-message.is-error { color: #b64d4a !important; }
 .song-controls .setlist-stepper { min-height: 52px; padding: 4px 8px; gap: 10px; font-size: 16px; }
 .song-controls .setlist-stepper .icon-button { width: 44px; height: 44px; padding: 10px; flex-shrink: 0; }
 .song-controls .setlist-stepper .icon-button svg { width: 22px; height: 22px; }
@@ -535,6 +541,7 @@ html[data-theme="dark"] .song-controls .setlist-stepper .icon-button:disabled { 
 .whole-song-part:first-of-type h3 { margin-top: 16px; }
 .whole-song-part .chord-score { margin-top: 18px; }
 .chord-score { display: grid; justify-items: start; gap: 12px; width: 100%; min-width: 0; margin-top: 28px; }
+.legacy-chord-notes { max-width: 100%; overflow-wrap: anywhere; color: #38aabb; font: 700 15px/1.35 "SFMono-Regular", Consolas, "Liberation Mono", monospace; white-space: pre-wrap; }
 .aligned-line { display: grid; grid-template-columns: repeat(var(--lyric-columns), 1ch); grid-template-rows: auto auto; align-items: end; width: max-content; min-height: 2.55em; font: 500 var(--song-lyric-font-size, 22px)/1.25 "SFMono-Regular", Consolas, "Liberation Mono", monospace; white-space: pre; color: #26364e; }
 .aligned-chord { grid-row: 1; align-self: end; z-index: 1; width: max-content; padding: 0 2px 3px 0; color: #4264b2; background: #fff; font: 700 15px/1.2 "SFMono-Regular", Consolas, "Liberation Mono", monospace; white-space: nowrap; }
 .lyric-char { grid-row: 2; white-space: pre; }
@@ -545,6 +552,7 @@ html[data-theme="dark"] .song-controls .setlist-stepper .icon-button:disabled { 
 .whole-song-part.is-guided .aligned-chord { background: transparent; color: #38aabb; }
 html[data-theme="dark"] .aligned-chord,
 html[data-theme="dark"] .whole-song-part.is-guided .aligned-chord { background: transparent; color: #67d4d7; }
+html[data-theme="dark"] .legacy-chord-notes { color: #67d4d7; }
 .leader-hint { position: static; margin-top: 24px; }
 .source-details { padding: 0; overflow: hidden; }
 .source-details > summary { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 0 17px; color: #3d4f69; cursor: pointer; list-style: none; }
@@ -806,7 +814,7 @@ html[data-theme="dark"] .import-support-note { color: #c9d4e3; }
   .nav-link, .nav-link.selected { align-self: center; justify-content: center; gap: 0; width: 50px; min-width: 50px; height: 48px; padding: 0; margin: 3px auto; font-size: 0; }
   .nav-link svg { flex: 0 0 22px; width: 22px; height: 22px; }
   .nav-count { display: none; }
-  .sidebar-utilities { align-items: center; width: 100%; margin-top: auto; }
+  .sidebar-utilities { align-items: center; width: 100%; margin-top: 4px; }
   .sidebar-utilities .nav-link.sidebar-settings { justify-content: center; gap: 0; width: 50px; min-width: 50px; height: 48px; padding: 0; font-size: 0; }
   .sidebar-utilities .nav-link.sidebar-settings span { display: none; }
   .profile-menu { width: 100%; }
@@ -952,6 +960,56 @@ html[data-theme="dark"] .is-song-view .song-controls { background: #111b29; bord
 .access-panel .member-row { height: auto; min-height: 64px; gap: 12px; flex-wrap: wrap; padding: 10px 0; }
 .access-panel .member-row > b { font-size: 14px; overflow-wrap: anywhere; }
 .access-panel .member-auth-type { font-size: 12px; }
+.access-panel .member-list { max-height: min(60dvh, 620px); overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
 html[data-theme="dark"] .access-panel { background: #111b29; border-color: #465872; }
 html[data-theme="dark"] .settings-access-link p { color: #c9d4e3; }
-@media (max-width: 700px) { .access-panel { padding: 16px; } }
+@media (max-width: 700px) {
+  .access-panel { padding: 16px; }
+  .access-panel .member-list { max-height: min(52dvh, 460px); }
+}
+
+/* Keep desktop's vertical sidebar flow on mobile without widening the icon rail. */
+@media (max-width: 700px) {
+  .sidebar {
+    align-items: center;
+    width: 68px;
+    padding: 16px 8px;
+  }
+  .brand-lockup {
+    align-self: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    padding: 2px;
+    margin: 0 auto 27px;
+  }
+  .brand-lockup > span:last-child, .workspace-label { display: none; }
+  .brand-logo, .brand-mark { flex: 0 0 40px; width: 40px; height: 40px; }
+  .nav-link, .nav-link.selected {
+    align-self: center;
+    justify-content: center;
+    width: 44px;
+    min-width: 44px;
+    height: 46px;
+    gap: 0;
+    margin: 3px auto;
+    padding: 0;
+    font-size: 0;
+  }
+  .nav-link svg { flex: 0 0 20px; width: 20px; height: 20px; }
+  .nav-count { display: none; }
+  .sidebar-utilities { align-items: center; width: 100%; margin-top: 4px; }
+  .sidebar-utilities .nav-link.sidebar-settings { width: 44px; min-width: 44px; height: 46px; margin: 3px auto; padding: 0; }
+  .sidebar-utilities .nav-link.sidebar-settings span, .profile-menu-copy { display: none; }
+  .profile-menu { width: 100%; }
+  .profile-menu-trigger { justify-content: center; width: 44px; min-width: 44px; height: 46px; margin: 3px auto; padding: 0; }
+  .profile-menu-panel { left: calc(100% + 8px); width: 220px; }
+  .sidebar-powered-by { width: 44px; min-width: 44px; height: 44px; margin: auto auto 0; padding: 0; }
+  .sidebar-powered-by .powered-by-copy { display: none; }
+  .sidebar-powered-by .powered-by-mark-wrap { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
+  .sidebar-powered-by .powered-by-mark { width: 20px; height: 20px; }
+  .main-area { width: auto; margin-left: 68px; }
+  .is-song-view .sidebar { display: none; }
+  .is-song-view .main-area { margin-left: 0; }
+}

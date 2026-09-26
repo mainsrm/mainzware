@@ -55,6 +55,14 @@ setlists, change the app name, or send live section/song selections. Choir and
 musician devices poll the current service state and update their song view.
 Setlists archive on API access after their service time plus six hours.
 
+Live guidance has two modes: any active leader can manually select parts, or one
+leader device can claim automatic voice guidance. The automatic controller is
+leased in `live_worship.live_state`, so another leader device cannot publish
+competing recognition results. A manual selection from any leader tablet releases
+the automatic lease. The frontend uses the browser speech-recognition API as an
+initial voice-guide adapter; unsupported browsers continue to use synchronized
+manual controls.
+
 OCR text and reviewed song fields are saved to PostgreSQL. Original page photos
 are uploaded to the private app storage folder.
 
