@@ -14,8 +14,12 @@ try {
     $identityId = $find->fetchColumn();
     if (!$identityId) { fwrite(STDERR, "No active MainzWare user named {$username}.\n"); exit(1); }
     $grant = $db->prepare(
-        "INSERT INTO live_worship.members (identity_id, role, active) VALUES (:identity, 'leader', TRUE)
-         ON CONFLICT (identity_id) DO UPDATE SET role='leader', active=TRUE"
+        "INSERT INTO live_worship.members
+            (identity_id, role, activated_on, activated_by, inactivated_on, inactivated_by)
+         VALUES (:identity, 'leader', now(), 0, NULL, NULL)
+         ON CONFLICT (identity_id) DO UPDATE
+            SET role='leader', activated_on=now(), activated_by=0,
+                inactivated_on=NULL, inactivated_by=NULL"
     );
     $grant->execute(['identity' => (int) $identityId]);
     echo "Granted Live Worship leader access to {$username}.\n";

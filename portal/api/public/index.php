@@ -58,7 +58,16 @@ register_shutdown_function(static function () use ($emitServerError): void {
     }
 });
 
-session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax']);
+// Portal and Live Worship are separate frontends in local development, but
+// they intentionally share the same first-party PHP session through the
+// /api proxy. Set the path explicitly so a host's PHP default cannot scope the
+// cookie to /api/public (which would make the tenant frontend appear logged
+// out immediately after a successful MainzWare login).
+session_set_cookie_params([
+    'path' => '/',
+    'httponly' => true,
+    'samesite' => 'Lax',
+]);
 session_start();
 
 Router::dispatch($_SERVER['REQUEST_METHOD'], $_SERVER['REQUEST_URI']);

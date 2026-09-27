@@ -20,6 +20,11 @@ final class Api
             $api->db = Database::connection();
             $normalizedPath = rtrim(preg_replace('#^/api/v1/live-worship#', '', parse_url($path, PHP_URL_PATH) ?: '/'), '/') ?: '/';
             if ($api->authRoute($method, $normalizedPath)) return;
+            $tenantContext = $api->selectedTenantContext();
+            if ($tenantContext !== null) {
+                TenantRuntime::dispatch($api->db, $tenantContext, $method, $path);
+                return;
+            }
             $api->member = Access::member();
             $api->route($method, $path);
         } catch (ApiError $error) {
@@ -34,6 +39,14 @@ final class Api
 
     private function authRoute(string $method, string $path): bool
     {
+        if (str_starts_with($path, '/admin')) { AdminApi::dispatch($this->db, $method, $path); return true; }
+        if ($method === 'POST' && $path === '/onboarding/slug-preview') { $this->previewTeamSlug(); return true; }
+        if ($method === 'POST' && $path === '/onboarding/teams/join') { $this->joinTeam(); return true; }
+        if ($method === 'GET' && $path === '/onboarding/teams') { $this->listTeams(); return true; }
+        if ($method === 'POST' && $path === '/onboarding/teams') { $this->createTeam(); return true; }
+        if ($method === 'POST' && $path === '/context') { $this->selectTenantContext(); return true; }
+        if ($method === 'GET' && $path === '/context') { $this->showTenantContext(); return true; }
+        if ($method === 'DELETE' && $path === '/context') { $this->clearTenantContext(); return true; }
         if ($method === 'POST' && $path === '/auth/login') { $this->login(); return true; }
         if ($method === 'POST' && $path === '/auth/logout') { $this->logout(); return true; }
         if ($method === 'POST' && $path === '/auth/password') { $this->changePassword(); return true; }
@@ -41,32 +54,173 @@ final class Api
         return false;
     }
 
+    private function previewTeamSlug(): void
+    {
+        $displayName = (string) ($this->body()['display_name'] ?? '');
+        try {
+            $slug = TenantNames::slugFromDisplayName($displayName);
+        } catch (\InvalidArgumentException $error) {
+            throw new ApiError(422, $error->getMessage());
+        }
+
+        // This endpoint deliberately does not check the registry. It previews
+        // deterministic translation without revealing whether a tenant exists;
+        // creation performs the authoritative active-slug collision check.
+        $this->respond([
+            'display_name' => trim($displayName),
+            'slug' => $slug,
+        ]);
+    }
+
+    private function createTeam(): void
+    {
+        if (($_SESSION['live_worship_auth_mode'] ?? '') === 'standalone') {
+            throw new ApiError(401, 'Sign in with a MainzWare account to create a team.');
+        }
+        $identity = \MainzWorld\Support\Auth::currentUser();
+        if ($identity === null) throw new ApiError(401, 'Sign in to MainzWare to create a team.');
+        $displayName = (string) ($this->body()['display_name'] ?? '');
+        try {
+            // Validate the submitted name before creating any identity mapping;
+            // TenantProvisioner derives it again inside the reservation.
+            TenantNames::slugFromDisplayName($displayName);
+            $actorId = ActorIdentity::ensureMainzWareActor($this->db, $identity);
+            $team = TenantProvisioner::request($this->db, $displayName, $actorId);
+        } catch (TenantConflict $error) {
+            throw new ApiError(409, $error->getMessage());
+        } catch (\InvalidArgumentException $error) {
+            throw new ApiError(422, $error->getMessage());
+        }
+        $this->respond($team, 202);
+    }
+
+    private function joinTeam(): void
+    {
+        $identity = $this->mainzWareIdentity();
+        $body = $this->body();
+        $code = trim((string) ($body['code'] ?? ''));
+        try {
+            $actorId = ActorIdentity::ensureMainzWareActor($this->db, $identity);
+            $joined = TenantInvitations::accept($this->db, $code, $actorId);
+        } catch (TenantInvitationError $error) {
+            throw new ApiError($error->status, $error->getMessage());
+        }
+        $_SESSION['live_worship_tenant_id'] = $joined['tenant_id'];
+        $this->respond($joined, 201);
+    }
+
+    private function listTeams(): void
+    {
+        $identity = $this->mainzWareIdentity();
+        $actorId = ActorIdentity::ensureMainzWareActor($this->db, $identity);
+        $this->respond(TenantMembershipDirectory::forActor($this->db, $actorId));
+    }
+
+    private function selectTenantContext(): void
+    {
+        $identity = $this->mainzWareIdentity();
+        $actorId = ActorIdentity::ensureMainzWareActor($this->db, $identity);
+        $slug = (string) ($this->body()['slug'] ?? '');
+        try {
+            $context = TenantContext::select($this->db, $identity, $slug);
+        } catch (TenantContextError $error) {
+            $this->recordLoginActivity($actorId, null, 'tenant_context', 'failure', 'mainzworld', null, 'context_rejected');
+            throw new ApiError($error->status, $error->getMessage());
+        }
+        $_SESSION['live_worship_tenant_id'] = $context['tenant_id'];
+        $this->recordLoginActivity($actorId, (string) $context['tenant_id'], 'tenant_context', 'success', 'mainzworld', $identity['username'] ?? null);
+        $this->respond($context);
+    }
+
+    private function showTenantContext(): void
+    {
+        $identity = $this->mainzWareIdentity();
+        try {
+            $context = TenantContext::current($this->db, $identity);
+        } catch (TenantContextError $error) {
+            throw new ApiError($error->status, $error->getMessage());
+        }
+        $this->respond($context);
+    }
+
+    private function clearTenantContext(): void
+    {
+        unset($_SESSION['live_worship_tenant_id']);
+        $this->respond(['ok' => true]);
+    }
+
+    private function mainzWareIdentity(): array
+    {
+        if (($_SESSION['live_worship_auth_mode'] ?? '') === 'standalone') {
+            throw new ApiError(401, 'Sign in with a MainzWare account to select a team.');
+        }
+        $identity = \MainzWorld\Support\Auth::currentUser();
+        if ($identity === null) throw new ApiError(401, 'Sign in to MainzWare to select a team.');
+        return $identity;
+    }
+
+    private function selectedTenantContext(): ?array
+    {
+        if (($_SESSION['live_worship_auth_mode'] ?? '') === 'standalone') return null;
+        $selected = trim((string) ($_SERVER['HTTP_X_LIVE_WORSHIP_TENANT_ID'] ?? $_SESSION['live_worship_tenant_id'] ?? ''));
+        if ($selected === '') return null;
+        try {
+            return TenantContext::current($this->db, $this->mainzWareIdentity());
+        } catch (TenantContextError $error) {
+            throw new ApiError($error->status, $error->getMessage());
+        }
+    }
+
     private function login(): void
     {
         $body = $this->body();
         $username = trim((string) ($body['username'] ?? ''));
         $password = (string) ($body['password'] ?? '');
-        if ($username === '' || $password === '') throw new ApiError(400, 'Enter your username and password.');
+        if ($username === '' || $password === '') {
+            $this->recordLoginActivity(null, null, 'login', 'failure', 'standalone', null, 'missing_credentials');
+            throw new ApiError(400, 'Enter your username and password.');
+        }
 
         $stmt = $this->db->prepare(
             'SELECT a.id, a.username, a.password_hash
                FROM live_worship.standalone_accounts a
-               JOIN live_worship.members m ON m.standalone_account_id = a.id AND m.active = TRUE
-              WHERE lower(a.username) = lower(:username)'
+               JOIN live_worship.members m
+                 ON m.standalone_account_id = a.id
+                AND m.inactivated_on IS NULL AND m.inactivated_by IS NULL
+              WHERE lower(a.username) = lower(:username)
+                AND a.inactivated_on IS NULL AND a.inactivated_by IS NULL'
         );
         $stmt->execute(['username' => $username]);
         $account = $stmt->fetch();
-        if (!$account || !password_verify($password, $account['password_hash'])) throw new ApiError(401, 'Invalid username or password.');
+        if (!$account || !password_verify($password, $account['password_hash'])) {
+            $this->recordLoginActivity(null, null, 'login', 'failure', 'standalone', null, 'invalid_credentials');
+            throw new ApiError(401, 'Invalid username or password.');
+        }
 
         session_regenerate_id(true);
         $_SESSION['live_worship_auth_mode'] = 'standalone';
         $_SESSION['live_worship_account_id'] = (int) $account['id'];
+        $this->recordLoginActivity(null, null, 'login', 'success', 'standalone', $account['username']);
         $this->respond(['username' => $account['username']]);
     }
 
     private function logout(): void
     {
-        unset($_SESSION['live_worship_account_id']);
+        $supportSessionId = trim((string) ($_SESSION['live_worship_support_session_id'] ?? ''));
+        if ($supportSessionId !== '') {
+            try {
+                $identity = \MainzWorld\Support\Auth::currentUser();
+                if ($identity !== null) {
+                    $actorId = ActorIdentity::ensureMainzWareActor($this->db, $identity);
+                    SupportSessions::end($this->db, $actorId, $supportSessionId);
+                }
+            } catch (Throwable $error) {
+                // Logout must still clear the browser context if the support
+                // record was already expired or the identity session ended.
+                error_log('Live Worship support session cleanup during logout: ' . $error->getMessage());
+            }
+        }
+        unset($_SESSION['live_worship_account_id'], $_SESSION['live_worship_tenant_id'], $_SESSION['live_worship_support_session_id']);
         $_SESSION['live_worship_auth_mode'] = 'signed_out';
         $this->respond(['ok' => true]);
     }
@@ -74,7 +228,7 @@ final class Api
     private function useMainzWareSession(): void
     {
         if (\MainzWorld\Support\Auth::currentUser() === null) throw new ApiError(401, 'Sign in to MainzWare first.');
-        unset($_SESSION['live_worship_account_id'], $_SESSION['live_worship_auth_mode']);
+        unset($_SESSION['live_worship_account_id'], $_SESSION['live_worship_auth_mode'], $_SESSION['live_worship_tenant_id']);
         $this->respond(['ok' => true]);
     }
 
@@ -88,7 +242,7 @@ final class Api
         $next = (string) ($body['new_password'] ?? '');
         if (strlen($next) < 8) throw new ApiError(400, 'Your new password must be at least 8 characters.');
 
-        $stmt = $this->db->prepare('SELECT password_hash FROM live_worship.standalone_accounts WHERE id = :id');
+        $stmt = $this->db->prepare('SELECT password_hash FROM live_worship.standalone_accounts WHERE id = :id AND inactivated_on IS NULL AND inactivated_by IS NULL');
         $stmt->execute(['id' => $accountId]);
         $hash = $stmt->fetchColumn();
         if (!$hash || !password_verify($current, (string) $hash)) throw new ApiError(400, 'Your current password is incorrect.');
@@ -123,9 +277,6 @@ final class Api
         if ($method === 'PATCH' && preg_match('#^/songs/(\d+)/key$#', $path, $m)) { $this->updateSong((int) $m[1], true); return; }
         if ($method === 'PUT' && preg_match('#^/songs/(\d+)$#', $path, $m)) { $this->updateSong((int) $m[1]); return; }
         if ($method === 'DELETE' && preg_match('#^/songs/(\d+)$#', $path, $m)) { $this->deleteSong((int) $m[1]); return; }
-        if ($method === 'POST' && preg_match('#^/songs/(\d+)/pages$#', $path, $m)) { $this->addPages((int) $m[1]); return; }
-        if ($method === 'DELETE' && preg_match('#^/songs/(\d+)/pages/(\d+)$#', $path, $m)) { $this->deletePage((int) $m[1], (int) $m[2]); return; }
-        if ($method === 'GET' && preg_match('#^/song-pages/(\d+)$#', $path, $m)) { $this->showPage((int) $m[1]); return; }
         if ($method === 'GET' && $path === '/setlists') { $this->setlists(); return; }
         if ($method === 'POST' && $path === '/setlists') { $this->createSetlist(); return; }
         if ($method === 'PUT' && preg_match('#^/setlists/(\d+)$#', $path, $m)) { $this->updateSetlist((int) $m[1]); return; }
@@ -201,7 +352,7 @@ final class Api
         $body = $this->body();
         $name = trim((string) ($body['display_name'] ?? ''));
         if ($name === '' || mb_strlen($name) > 80) throw new ApiError(400, 'Choose a name between 1 and 80 characters.');
-        $stmt = $this->db->prepare('UPDATE live_worship.settings SET display_name = :name, updated_at = now() WHERE id = TRUE');
+        $stmt = $this->db->prepare('UPDATE live_worship.settings SET display_name = :name, updated_at = now() WHERE id = TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
         $stmt->execute(['name' => $name]);
         $this->respond($this->settingsData());
     }
@@ -212,9 +363,9 @@ final class Api
         if (!isset($_FILES['logo'])) throw new ApiError(400, 'Choose an image to upload.');
         $stored = Files::save($_FILES['logo'], 'branding');
         try {
-            $stmt = $this->db->query('SELECT logo_path FROM live_worship.settings WHERE id=TRUE');
+            $stmt = $this->db->query('SELECT logo_path FROM live_worship.settings WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
             $previousPath = $stmt->fetchColumn() ?: null;
-            $update = $this->db->prepare('UPDATE live_worship.settings SET logo_path=:path, logo_mime_type=:mime, logo_file_size_bytes=:size, updated_at=now() WHERE id=TRUE');
+            $update = $this->db->prepare('UPDATE live_worship.settings SET logo_path=:path, logo_mime_type=:mime, logo_file_size_bytes=:size, updated_at=now() WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
             $update->execute(['path' => $stored['path'], 'mime' => $stored['mime'], 'size' => $stored['size']]);
         } catch (Throwable $error) {
             Files::remove($stored['path']);
@@ -227,15 +378,15 @@ final class Api
     private function deleteLogo(): void
     {
         Access::leader($this->member);
-        $previousPath = $this->db->query('SELECT logo_path FROM live_worship.settings WHERE id=TRUE')->fetchColumn() ?: null;
-        $this->db->exec('UPDATE live_worship.settings SET logo_path=NULL, logo_mime_type=NULL, logo_file_size_bytes=NULL, updated_at=now() WHERE id=TRUE');
+        $previousPath = $this->db->query('SELECT logo_path FROM live_worship.settings WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL')->fetchColumn() ?: null;
+        $this->db->exec('UPDATE live_worship.settings SET logo_path=NULL, logo_mime_type=NULL, logo_file_size_bytes=NULL, updated_at=now() WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
         if ($previousPath) Files::remove($previousPath);
         $this->respond($this->settingsData());
     }
 
     private function showLogo(): void
     {
-        $row = $this->db->query('SELECT logo_path, logo_mime_type FROM live_worship.settings WHERE id=TRUE')->fetch();
+        $row = $this->db->query('SELECT logo_path, logo_mime_type FROM live_worship.settings WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL')->fetch();
         if (!$row || !$row['logo_path']) throw new ApiError(404, 'No team logo has been uploaded.');
         $path = Files::absolute($row['logo_path']);
         header('Content-Type: ' . $row['logo_mime_type']);
@@ -247,7 +398,7 @@ final class Api
 
     private function settingsData(): array
     {
-        $row = $this->db->query('SELECT display_name, logo_path, updated_at FROM live_worship.settings WHERE id=TRUE')->fetch();
+        $row = $this->db->query('SELECT display_name, logo_path, updated_at FROM live_worship.settings WHERE id=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL')->fetch();
         $row['logo_url'] = $row['logo_path'] ? '/api/v1/live-worship/branding/logo?v=' . rawurlencode((string) $row['updated_at']) : null;
         unset($row['logo_path']);
         return $row;
@@ -256,23 +407,26 @@ final class Api
     private function storage(): void
     {
         Access::leader($this->member);
-        $stmt = $this->db->query('SELECT count(*)::bigint AS page_count, coalesce(sum(file_size_bytes), 0)::bigint AS total_bytes FROM live_worship.song_pages');
-        $result = $stmt->fetch();
-        $result['page_count'] = (int) $result['page_count'];
-        $result['total_bytes'] = (int) $result['total_bytes'];
-        $result['total_megabytes'] = round($result['total_bytes'] / 1048576, 2);
-        $this->respond($result);
+        $this->respond(['page_count' => 0, 'total_bytes' => 0, 'total_megabytes' => 0]);
     }
 
     private function currentLive(): void
     {
         $this->archiveExpired();
-        $this->db->exec("UPDATE live_worship.live_state st SET is_live=FALSE, revision=revision+1, updated_at=now() FROM live_worship.setlists sl WHERE st.setlist_id=sl.id AND st.is_live=TRUE AND sl.status='archived'");
+        $this->db->exec("UPDATE live_worship.live_state st
+                            SET is_live=FALSE, revision=revision+1, updated_at=now()
+                           FROM live_worship.setlists sl
+                          WHERE st.setlist_id=sl.id
+                            AND st.is_live=TRUE
+                            AND (sl.inactivated_on IS NOT NULL OR sl.inactivated_by IS NOT NULL)");
         $row = $this->db->query(
             "SELECT l.setlist_id, s.name AS setlist_name, l.song_id, l.section_id,
                     l.control_mode, l.controller_member_id, l.revision, l.updated_at
                FROM live_worship.live_state l JOIN live_worship.setlists s ON s.id=l.setlist_id
-              WHERE l.is_live=TRUE AND s.status='active' LIMIT 1"
+              WHERE l.is_live=TRUE
+                AND l.inactivated_on IS NULL AND l.inactivated_by IS NULL
+                AND s.inactivated_on IS NULL AND s.inactivated_by IS NULL
+              LIMIT 1"
         )->fetch();
         if (!$row) { $this->respond(null); return; }
         $row['setlist_id'] = (int) $row['setlist_id'];
@@ -286,14 +440,16 @@ final class Api
     {
         Access::leader($this->member);
         $rows = $this->db->query(
-            "SELECT m.id, m.identity_id, m.standalone_account_id, m.role, m.active,
+            "SELECT m.id, m.identity_id, m.standalone_account_id, m.role,
+                    (m.inactivated_on IS NULL AND m.inactivated_by IS NULL) AS active,
                     COALESCE(u.username, a.username) AS username,
                     CASE WHEN m.standalone_account_id IS NULL THEN 'mainzware' ELSE 'live_worship' END AS auth_type,
                     m.created_at
                FROM live_worship.members m
                LEFT JOIN auth.users u ON u.id = m.identity_id
                LEFT JOIN live_worship.standalone_accounts a ON a.id = m.standalone_account_id
-              ORDER BY m.active DESC, COALESCE(u.username, a.username)"
+              ORDER BY (m.inactivated_on IS NULL AND m.inactivated_by IS NULL) DESC,
+                       COALESCE(u.username, a.username)"
         )->fetchAll();
         foreach ($rows as &$row) $row['active'] = in_array($row['active'], [true, 't', '1', 1], true);
         $this->respond($rows);
@@ -316,11 +472,17 @@ final class Api
             $identityId = $userQuery->fetchColumn();
             if (!$identityId) throw new ApiError(404, 'No active MainzWare account has that username.');
             $insert = $this->db->prepare(
-                'INSERT INTO live_worship.members (identity_id, role, active) VALUES (:identity_id, :role, TRUE)
-                 ON CONFLICT (identity_id) DO UPDATE SET role = EXCLUDED.role, active = TRUE
-                 RETURNING id, identity_id, role, active'
+                'INSERT INTO live_worship.members
+                    (identity_id, role, activated_on, activated_by, inactivated_on, inactivated_by)
+                 VALUES (:identity_id, :role, now(), :activated_by, NULL, NULL)
+                 ON CONFLICT (identity_id) DO UPDATE
+                    SET role = EXCLUDED.role,
+                        activated_on = now(), activated_by = EXCLUDED.activated_by,
+                        inactivated_on = NULL, inactivated_by = NULL
+                 RETURNING id, identity_id, role,
+                           (inactivated_on IS NULL AND inactivated_by IS NULL) AS active'
             );
-            $insert->execute(['identity_id' => (int) $identityId, 'role' => $role]);
+            $insert->execute(['identity_id' => (int) $identityId, 'role' => $role, 'activated_by' => $this->member['id']]);
             $this->respond($insert->fetch(), 201);
             return;
         }
@@ -331,22 +493,22 @@ final class Api
         $findAccount->execute(['username' => $username]);
         $accountId = $findAccount->fetchColumn();
         if ($accountId) {
-            $updateAccount = $this->db->prepare('UPDATE live_worship.standalone_accounts SET password_hash = :hash, updated_at = now() WHERE id = :id');
-            $updateAccount->execute(['hash' => password_hash($password, PASSWORD_DEFAULT), 'id' => (int) $accountId]);
+            $updateAccount = $this->db->prepare('UPDATE live_worship.standalone_accounts SET password_hash = :hash, updated_at = now(), inactivated_on = NULL, inactivated_by = NULL, activated_on = now(), activated_by = :activated_by WHERE id = :id');
+            $updateAccount->execute(['hash' => password_hash($password, PASSWORD_DEFAULT), 'id' => (int) $accountId, 'activated_by' => $this->member['id']]);
         } else {
-            $createAccount = $this->db->prepare('INSERT INTO live_worship.standalone_accounts (username, password_hash) VALUES (:username, :hash) RETURNING id');
-            $createAccount->execute(['username' => $username, 'hash' => password_hash($password, PASSWORD_DEFAULT)]);
+            $createAccount = $this->db->prepare('INSERT INTO live_worship.standalone_accounts (username, password_hash, activated_on, activated_by) VALUES (:username, :hash, now(), :activated_by) RETURNING id');
+            $createAccount->execute(['username' => $username, 'hash' => password_hash($password, PASSWORD_DEFAULT), 'activated_by' => $this->member['id']]);
             $accountId = $createAccount->fetchColumn();
         }
         $existingMember = $this->db->prepare('SELECT id FROM live_worship.members WHERE standalone_account_id = :account_id');
         $existingMember->execute(['account_id' => (int) $accountId]);
         $memberId = $existingMember->fetchColumn();
         if ($memberId) {
-            $saveMember = $this->db->prepare('UPDATE live_worship.members SET role = :role, active = TRUE WHERE id = :id RETURNING id, standalone_account_id, role, active');
-            $saveMember->execute(['role' => $role, 'id' => (int) $memberId]);
+            $saveMember = $this->db->prepare('UPDATE live_worship.members SET role = :role, activated_on = now(), activated_by = :activated_by, inactivated_on = NULL, inactivated_by = NULL WHERE id = :id RETURNING id, standalone_account_id, role, (inactivated_on IS NULL AND inactivated_by IS NULL) AS active');
+            $saveMember->execute(['role' => $role, 'id' => (int) $memberId, 'activated_by' => $this->member['id']]);
         } else {
-            $saveMember = $this->db->prepare('INSERT INTO live_worship.members (standalone_account_id, role, active) VALUES (:account_id, :role, TRUE) RETURNING id, standalone_account_id, role, active');
-            $saveMember->execute(['account_id' => (int) $accountId, 'role' => $role]);
+            $saveMember = $this->db->prepare('INSERT INTO live_worship.members (standalone_account_id, role, activated_on, activated_by) VALUES (:account_id, :role, now(), :activated_by) RETURNING id, standalone_account_id, role, (inactivated_on IS NULL AND inactivated_by IS NULL) AS active');
+            $saveMember->execute(['account_id' => (int) $accountId, 'role' => $role, 'activated_by' => $this->member['id']]);
         }
         $this->respond($saveMember->fetch(), 201);
     }
@@ -359,7 +521,7 @@ final class Api
         if (!in_array($role, ['leader', 'choir', 'musician'], true)) throw new ApiError(400, 'Choose leader, choir, or musician.');
         $existing = $this->memberById($id);
         if ($existing['role'] === 'leader' && $role !== 'leader') $this->ensureAnotherLeader($id);
-        $stmt = $this->db->prepare('UPDATE live_worship.members SET role = :role WHERE id = :id RETURNING id, identity_id, role, active');
+        $stmt = $this->db->prepare('UPDATE live_worship.members SET role = :role WHERE id = :id RETURNING id, identity_id, role, (inactivated_on IS NULL AND inactivated_by IS NULL) AS active');
         $stmt->execute(['role' => $role, 'id' => $id]);
         $this->respond($stmt->fetch());
     }
@@ -370,14 +532,14 @@ final class Api
         $existing = $this->memberById($id);
         if ((int) $existing['id'] === $this->member['id']) throw new ApiError(400, 'You cannot remove your own Live Worship access.');
         if ($existing['role'] === 'leader') $this->ensureAnotherLeader($id);
-        $stmt = $this->db->prepare('UPDATE live_worship.members SET active = FALSE WHERE id = :id');
-        $stmt->execute(['id' => $id]);
+        $stmt = $this->db->prepare('UPDATE live_worship.members SET inactivated_on = now(), inactivated_by = :inactivated_by WHERE id = :id AND inactivated_on IS NULL AND inactivated_by IS NULL');
+        $stmt->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
         $this->respond(['ok' => true]);
     }
 
     private function songs(): void
     {
-        $rows = $this->db->query('SELECT id FROM live_worship.songs ORDER BY title')->fetchAll(PDO::FETCH_COLUMN);
+        $rows = $this->db->query('SELECT id FROM live_worship.songs WHERE inactivated_on IS NULL AND inactivated_by IS NULL ORDER BY title')->fetchAll(PDO::FETCH_COLUMN);
         $songs = array_map(fn($id) => $this->songData((int) $id), $rows);
         $this->respond($songs);
     }
@@ -390,20 +552,23 @@ final class Api
         $body = $this->body();
         $fields = $this->songFields($body);
         $this->db->beginTransaction();
-        $storedPaths = [];
         try {
             $stmt = $this->db->prepare(
-                'INSERT INTO live_worship.songs (title, writer, default_key, original_key, lyrics, sections, ocr_text, created_by)
-                 VALUES (:title, :writer, :song_key, :original_key, :lyrics, CAST(:sections AS jsonb), :ocr_text, :created_by) RETURNING id'
+                'INSERT INTO live_worship.songs
+                    (title, writer, default_key, original_key, lyrics, sections, ocr_text,
+                     created_by, activated_on, activated_by)
+                 VALUES (:title, :writer, :song_key, :original_key, :lyrics,
+                         CAST(:sections AS jsonb), :ocr_text, :created_by, now(), :activated_by)
+                 RETURNING id'
             );
-            $stmt->execute($fields + ['original_key' => $fields['song_key'], 'created_by' => $this->member['id']]);
+            $stmt->execute($fields + [
+                'original_key' => $fields['song_key'],
+                'created_by' => $this->member['id'],
+                'activated_by' => $this->member['id'],
+            ]);
             $id = (int) $stmt->fetchColumn();
-            foreach ($this->uploadedPages() as $pageNumber => $file) {
-                $page = $this->insertPage($id, $pageNumber + 1, $file);
-                $storedPaths[] = $page['storage_path'];
-            }
             $this->db->commit();
-        } catch (Throwable $error) { $this->db->rollBack(); foreach ($storedPaths as $path) Files::remove($path); throw $error; }
+        } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
         $this->respond($this->songData($id), 201);
     }
 
@@ -413,7 +578,7 @@ final class Api
         $body = $this->body();
         $this->db->beginTransaction();
         try {
-            $lock = $this->db->prepare('SELECT id FROM live_worship.songs WHERE id=:id FOR UPDATE');
+            $lock = $this->db->prepare('SELECT id FROM live_worship.songs WHERE id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL FOR UPDATE');
             $lock->execute(['id' => $id]);
             $current = $this->songData($id);
             if ($keyOnly) {
@@ -431,10 +596,10 @@ final class Api
             );
             $stmt->execute($fields + ['original_key' => $current['default_key'] ?: $fields['song_key'], 'id' => $id]);
             $sectionIds = array_column($sections, 'id');
-            $live = $this->db->prepare('SELECT section_id FROM live_worship.live_state WHERE song_id=:id AND is_live=TRUE');
+            $live = $this->db->prepare('SELECT section_id FROM live_worship.live_state WHERE song_id=:id AND is_live=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
             $live->execute(['id' => $id]);
             $liveSection = $live->fetchColumn();
-            $fix = $this->db->prepare('UPDATE live_worship.live_state SET section_id=:section, revision=revision+1, updated_at=now() WHERE song_id=:id AND is_live=TRUE');
+            $fix = $this->db->prepare('UPDATE live_worship.live_state SET section_id=:section, revision=revision+1, updated_at=now() WHERE song_id=:id AND is_live=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
             $fix->execute(['section' => $liveSection === null || in_array($liveSection, $sectionIds, true) ? $liveSection : ($sectionIds[0] ?? null), 'id' => $id]);
             $this->db->commit();
         } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
@@ -444,75 +609,33 @@ final class Api
     private function deleteSong(int $id): void
     {
         Access::leader($this->member);
-        $pages = $this->db->prepare('SELECT image_path FROM live_worship.song_pages WHERE song_id=:id');
-        $pages->execute(['id' => $id]);
-        $paths = $pages->fetchAll(PDO::FETCH_COLUMN);
         $this->db->beginTransaction();
-        $this->db->prepare('UPDATE live_worship.live_state SET song_id=NULL, section_id=NULL, revision=revision+1, updated_at=now() WHERE song_id=:id')->execute(['id' => $id]);
-        $this->db->prepare('DELETE FROM live_worship.setlist_songs WHERE song_id=:id')->execute(['id' => $id]);
-        $stmt = $this->db->prepare('DELETE FROM live_worship.songs WHERE id=:id');
-        $stmt->execute(['id' => $id]);
+            $this->db->prepare('UPDATE live_worship.live_state SET song_id=NULL, section_id=NULL, revision=revision+1, updated_at=now() WHERE song_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL')->execute(['id' => $id]);
+        $this->db->prepare(
+            'UPDATE live_worship.setlist_songs
+                SET inactivated_on=now(), inactivated_by=:inactivated_by
+              WHERE song_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL'
+        )->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
+        $stmt = $this->db->prepare(
+            'UPDATE live_worship.songs
+                SET inactivated_on=now(), inactivated_by=:inactivated_by, updated_at=now()
+              WHERE id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL'
+        );
+        $stmt->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
         if ($stmt->rowCount() === 0) { $this->db->rollBack(); throw new ApiError(404, 'Song not found.'); }
         $this->db->commit();
-        foreach ($paths as $path) Files::remove($path);
         $this->respond(['ok' => true]);
-    }
-
-    private function addPages(int $songId): void
-    {
-        Access::leader($this->member);
-        $this->songData($songId);
-        $existing = $this->db->prepare('SELECT coalesce(max(page_number), 0) FROM live_worship.song_pages WHERE song_id=:id');
-        $existing->execute(['id' => $songId]);
-        $number = (int) $existing->fetchColumn();
-        $result = [];
-        $storedPaths = [];
-        $this->db->beginTransaction();
-        try {
-            foreach ($this->uploadedPages() as $file) {
-                $page = $this->insertPage($songId, ++$number, $file);
-                $storedPaths[] = $page['storage_path'];
-                unset($page['storage_path']);
-                $result[] = $page;
-            }
-            $this->db->commit();
-        } catch (Throwable $error) { $this->db->rollBack(); foreach ($storedPaths as $path) Files::remove($path); throw $error; }
-        $this->respond($result, 201);
-    }
-
-    private function deletePage(int $songId, int $pageId): void
-    {
-        Access::leader($this->member);
-        $stmt = $this->db->prepare('SELECT image_path FROM live_worship.song_pages WHERE id=:page AND song_id=:song');
-        $stmt->execute(['page' => $pageId, 'song' => $songId]);
-        $path = $stmt->fetchColumn();
-        if (!$path) throw new ApiError(404, 'Song page not found.');
-        $this->db->prepare('DELETE FROM live_worship.song_pages WHERE id=:page')->execute(['page' => $pageId]);
-        Files::remove($path);
-        $this->respond(['ok' => true]);
-    }
-
-    private function showPage(int $pageId): void
-    {
-        $stmt = $this->db->prepare('SELECT image_path, mime_type FROM live_worship.song_pages WHERE id=:id');
-        $stmt->execute(['id' => $pageId]);
-        $page = $stmt->fetch();
-        if (!$page) throw new ApiError(404, 'Song page not found.');
-        $path = Files::absolute($page['image_path']);
-        header('Content-Type: ' . $page['mime_type']);
-        header('Content-Length: ' . filesize($path));
-        header('X-Content-Type-Options: nosniff');
-        header('Cache-Control: private, max-age=300');
-        readfile($path);
     }
 
     private function setlists(): void
     {
         $this->archiveExpired();
-        $status = ($_GET['status'] ?? 'active') === 'archived' ? 'archived' : 'active';
-        $order = $status === 'active' ? 'ASC' : 'DESC';
-        $stmt = $this->db->prepare("SELECT id FROM live_worship.setlists WHERE status=:status ORDER BY service_at {$order}");
-        $stmt->execute(['status' => $status]);
+        $archived = ($_GET['status'] ?? 'active') === 'archived';
+        $order = $archived ? 'DESC' : 'ASC';
+        $where = $archived
+            ? 'inactivated_on IS NOT NULL AND inactivated_by IS NOT NULL'
+            : 'inactivated_on IS NULL AND inactivated_by IS NULL';
+        $stmt = $this->db->query("SELECT id FROM live_worship.setlists WHERE {$where} ORDER BY service_at {$order}");
         $rows = array_map(fn($id) => $this->setlistData((int) $id), $stmt->fetchAll(PDO::FETCH_COLUMN));
         $this->respond($rows);
     }
@@ -527,12 +650,15 @@ final class Api
         if ($name === '' || mb_strlen($name) > 100) throw new ApiError(400, 'Choose a service name up to 100 characters.');
         $this->db->beginTransaction();
         try {
-            $status = (new \DateTimeImmutable($time)) <= new \DateTimeImmutable('-6 hours') ? 'archived' : 'active';
-            $stmt = $this->db->prepare('INSERT INTO live_worship.setlists (name, service_at, status, created_by) VALUES (:name, :service_at, :status, :member) RETURNING id');
-            $stmt->execute(['name' => $name, 'service_at' => $time, 'status' => $status, 'member' => $this->member['id']]);
+            $stmt = $this->db->prepare('INSERT INTO live_worship.setlists (name, service_at, created_by, activated_on, activated_by) VALUES (:name, :service_at, :member, now(), :activated_by) RETURNING id');
+            $stmt->execute(['name' => $name, 'service_at' => $time, 'member' => $this->member['id'], 'activated_by' => $this->member['id']]);
             $id = (int) $stmt->fetchColumn();
+            if ((new \DateTimeImmutable($time)) <= new \DateTimeImmutable('-6 hours')) {
+                $this->db->prepare('UPDATE live_worship.setlists SET inactivated_on=now(), inactivated_by=:inactivated_by WHERE id=:id')
+                    ->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
+            }
             $this->replaceSetlistSongs($id, $songIds);
-            $this->db->prepare('INSERT INTO live_worship.live_state (setlist_id) VALUES (:id)')->execute(['id' => $id]);
+            $this->db->prepare('INSERT INTO live_worship.live_state (setlist_id, activated_on, activated_by) VALUES (:id, now(), :activated_by)')->execute(['id' => $id, 'activated_by' => $this->member['id']]);
             $this->db->commit();
         } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
         $this->respond($this->setlistData($id), 201);
@@ -549,13 +675,37 @@ final class Api
         if ($name === '' || mb_strlen($name) > 100) throw new ApiError(400, 'Choose a service name up to 100 characters.');
         $this->db->beginTransaction();
         try {
-            $status = (new \DateTimeImmutable($time)) <= new \DateTimeImmutable('-6 hours') ? 'archived' : 'active';
-            $stmt = $this->db->prepare('UPDATE live_worship.setlists SET name=:name, service_at=:service_at, status=:status WHERE id=:id');
-            $stmt->execute(['name' => $name, 'service_at' => $time, 'status' => $status, 'id' => $id]);
+            $archived = (new \DateTimeImmutable($time)) <= new \DateTimeImmutable('-6 hours');
+            if ($archived) {
+                $stmt = $this->db->prepare(
+                    'UPDATE live_worship.setlists
+                        SET name=:name, service_at=:service_at,
+                            inactivated_on=COALESCE(inactivated_on, now()),
+                            inactivated_by=COALESCE(inactivated_by, :inactivated_by)
+                      WHERE id=:id'
+                );
+                $stmt->execute(['name' => $name, 'service_at' => $time, 'inactivated_by' => $this->member['id'], 'id' => $id]);
+            } else {
+                $stmt = $this->db->prepare(
+                    'UPDATE live_worship.setlists
+                        SET name=:name, service_at=:service_at,
+                            activated_on=now(), activated_by=:activated_by,
+                            inactivated_on=NULL, inactivated_by=NULL
+                      WHERE id=:id'
+                );
+                $stmt->execute(['name' => $name, 'service_at' => $time, 'activated_by' => $this->member['id'], 'id' => $id]);
+            }
             $this->replaceSetlistSongs($id, $songIds);
             $this->db->prepare(
                 'UPDATE live_worship.live_state SET song_id=NULL, section_id=NULL, revision=revision+1, updated_at=now()
-                  WHERE setlist_id=:state_setlist AND song_id IS NOT NULL AND song_id NOT IN (SELECT song_id FROM live_worship.setlist_songs WHERE setlist_id=:songs_setlist)'
+                  WHERE setlist_id=:state_setlist
+                    AND inactivated_on IS NULL AND inactivated_by IS NULL
+                    AND song_id IS NOT NULL
+                    AND song_id NOT IN (
+                        SELECT song_id FROM live_worship.setlist_songs
+                         WHERE setlist_id=:songs_setlist
+                           AND inactivated_on IS NULL AND inactivated_by IS NULL
+                    )'
             )->execute(['state_setlist' => $id, 'songs_setlist' => $id]);
             $this->db->commit();
         } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
@@ -565,9 +715,18 @@ final class Api
     private function deleteSetlist(int $id): void
     {
         Access::leader($this->member);
-        $stmt = $this->db->prepare('DELETE FROM live_worship.setlists WHERE id=:id');
-        $stmt->execute(['id' => $id]);
-        if (!$stmt->rowCount()) throw new ApiError(404, 'Set list not found.');
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare('UPDATE live_worship.setlists SET inactivated_on=now(), inactivated_by=:inactivated_by WHERE id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL');
+            $stmt->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
+            if (!$stmt->rowCount()) throw new ApiError(404, 'Set list not found.');
+            $this->db->prepare('UPDATE live_worship.setlist_songs SET inactivated_on=now(), inactivated_by=:inactivated_by WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL')->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
+            $this->db->prepare('UPDATE live_worship.live_state SET inactivated_on=now(), inactivated_by=:inactivated_by, is_live=FALSE WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL')->execute(['id' => $id, 'inactivated_by' => $this->member['id']]);
+            $this->db->commit();
+        } catch (Throwable $error) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $error;
+        }
         $this->respond(['ok' => true]);
     }
 
@@ -578,11 +737,11 @@ final class Api
         $setlist = $this->setlistData($id);
         if ($setlist['status'] !== 'active') throw new ApiError(409, 'Archived services cannot be started.');
         $this->db->beginTransaction();
-        $this->db->exec('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE');
+        $this->db->exec('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL');
         $stmt = $this->db->prepare("UPDATE live_worship.live_state
                                       SET is_live=TRUE, control_mode='manual', controller_member_id=NULL, controller_token=NULL,
                                           revision=revision+1, updated_at=now()
-                                    WHERE setlist_id=:id");
+                                    WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL");
         $stmt->execute(['id' => $id]);
         $this->db->commit();
         $this->respond($this->setlistData($id));
@@ -591,7 +750,7 @@ final class Api
     private function liveState(int $setlistId): void
     {
         $this->setlistData($setlistId);
-        $stmt = $this->db->prepare('SELECT setlist_id, song_id, section_id, control_mode, controller_member_id, revision, updated_at FROM live_worship.live_state WHERE setlist_id=:id');
+        $stmt = $this->db->prepare('SELECT setlist_id, song_id, section_id, control_mode, controller_member_id, revision, updated_at FROM live_worship.live_state WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL');
         $stmt->execute(['id' => $setlistId]);
         $state = $stmt->fetch();
         if ($state) {
@@ -616,7 +775,7 @@ final class Api
 
         $this->db->beginTransaction();
         try {
-            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id FOR UPDATE');
+            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL FOR UPDATE');
             $lock->execute(['id' => $setlistId]);
             $current = $lock->fetch();
             if (!$current) throw new ApiError(409, 'Start this service before enabling live guidance.');
@@ -665,7 +824,7 @@ final class Api
         } else { $sectionId = null; }
         $this->db->beginTransaction();
         try {
-            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id FOR UPDATE');
+            $lock = $this->db->prepare('SELECT control_mode, controller_member_id, controller_token FROM live_worship.live_state WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL FOR UPDATE');
             $lock->execute(['id' => $setlistId]);
             $current = $lock->fetch();
             $currentMode = $current ? (string) $current['control_mode'] : 'manual';
@@ -678,13 +837,18 @@ final class Api
             if ($mode === 'automatic' && $requestedToken === '') throw new ApiError(400, 'A device token is required for automatic live guidance.');
             $controller = $mode === 'automatic' ? ($currentOwner ?? (int) $this->member['id']) : null;
             $controllerToken = $mode === 'automatic' ? ($currentToken ?? $requestedToken) : null;
-            $otherLive = $this->db->prepare('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE AND setlist_id<>:id');
+            $otherLive = $this->db->prepare('UPDATE live_worship.live_state SET is_live=FALSE, revision=revision+1, updated_at=now() WHERE is_live=TRUE AND inactivated_on IS NULL AND inactivated_by IS NULL AND setlist_id<>:id');
             $otherLive->execute(['id' => $setlistId]);
             $stmt = $this->db->prepare(
-                'INSERT INTO live_worship.live_state (setlist_id, song_id, section_id, control_mode, controller_member_id, controller_token, is_live) VALUES (:setlist, :song, :section, :mode, :controller, :token, TRUE)
+                'INSERT INTO live_worship.live_state
+                    (setlist_id, song_id, section_id, control_mode, controller_member_id,
+                     controller_token, is_live, activated_on, activated_by)
+                 VALUES (:setlist, :song, :section, :mode, :controller, :token, TRUE, now(), :activated_by)
                  ON CONFLICT (setlist_id) DO UPDATE SET song_id=EXCLUDED.song_id, section_id=EXCLUDED.section_id,
                  control_mode=EXCLUDED.control_mode, controller_member_id=EXCLUDED.controller_member_id, controller_token=EXCLUDED.controller_token,
-                 is_live=TRUE, revision=live_worship.live_state.revision + 1, updated_at=now()
+                 is_live=TRUE, revision=live_worship.live_state.revision + 1, updated_at=now(),
+                 activated_on=now(), activated_by=EXCLUDED.activated_by,
+                 inactivated_on=NULL, inactivated_by=NULL
                  WHERE live_worship.live_state.song_id IS DISTINCT FROM EXCLUDED.song_id
                     OR live_worship.live_state.section_id IS DISTINCT FROM EXCLUDED.section_id
                     OR live_worship.live_state.control_mode IS DISTINCT FROM EXCLUDED.control_mode
@@ -693,7 +857,7 @@ final class Api
                     OR live_worship.live_state.is_live=FALSE
                  RETURNING setlist_id, song_id, section_id, control_mode, controller_member_id, revision, updated_at'
             );
-            $stmt->execute(['setlist' => $setlistId, 'song' => $songId, 'section' => $sectionId, 'mode' => $mode, 'controller' => $controller, 'token' => $controllerToken]);
+            $stmt->execute(['setlist' => $setlistId, 'song' => $songId, 'section' => $sectionId, 'mode' => $mode, 'controller' => $controller, 'token' => $controllerToken, 'activated_by' => $this->member['id']]);
             $state = $stmt->fetch();
             $this->db->commit();
         } catch (Throwable $error) { $this->db->rollBack(); throw $error; }
@@ -707,17 +871,14 @@ final class Api
 
     private function songData(int $id): array
     {
-        $stmt = $this->db->prepare('SELECT id, title, writer, default_key, original_key, lyrics, sections, ocr_text, created_at, updated_at FROM live_worship.songs WHERE id=:id');
+        $stmt = $this->db->prepare('SELECT id, title, writer, default_key, original_key, lyrics, sections, ocr_text, created_at, updated_at FROM live_worship.songs WHERE id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL');
         $stmt->execute(['id' => $id]);
         $song = $stmt->fetch();
         if (!$song) throw new ApiError(404, 'Song not found.');
         $song['id'] = (int) $song['id'];
         $song['sections'] = $this->normalizeChordPositions(json_decode($song['sections'], true, 512, JSON_THROW_ON_ERROR) ?: []);
-        $pages = $this->db->prepare('SELECT id, page_number, mime_type, file_size_bytes FROM live_worship.song_pages WHERE song_id=:id ORDER BY page_number');
-        $pages->execute(['id' => $id]);
-        $song['pages'] = array_map(static function (array $page): array {
-            return ['id' => (int) $page['id'], 'number' => (int) $page['page_number'], 'mime_type' => $page['mime_type'], 'file_size_bytes' => (int) $page['file_size_bytes'], 'url' => '/api/v1/live-worship/song-pages/' . (int) $page['id']];
-        }, $pages->fetchAll());
+        // Source images are transient OCR input and are never retained as song assets.
+        $song['pages'] = [];
         return $song;
     }
 
@@ -742,13 +903,23 @@ final class Api
 
     private function setlistData(int $id): array
     {
-        $stmt = $this->db->prepare('SELECT s.id, s.name, s.service_at, s.status, s.created_at, coalesce(l.is_live, FALSE) AS current FROM live_worship.setlists s LEFT JOIN live_worship.live_state l ON l.setlist_id=s.id WHERE s.id=:id');
+        $stmt = $this->db->prepare(
+            'SELECT s.id, s.name, s.service_at,
+                    CASE WHEN s.inactivated_on IS NULL AND s.inactivated_by IS NULL
+                         THEN \'active\' ELSE \'archived\' END AS status,
+                    s.created_at, coalesce(l.is_live, FALSE) AS current
+               FROM live_worship.setlists s
+               LEFT JOIN live_worship.live_state l
+                 ON l.setlist_id=s.id
+                AND l.inactivated_on IS NULL AND l.inactivated_by IS NULL
+              WHERE s.id=:id'
+        );
         $stmt->execute(['id' => $id]);
         $setlist = $stmt->fetch();
         if (!$setlist) throw new ApiError(404, 'Set list not found.');
         $setlist['id'] = (int) $setlist['id'];
         $setlist['current'] = in_array($setlist['current'], [true, 't', '1', 1], true);
-        $songs = $this->db->prepare('SELECT song_id FROM live_worship.setlist_songs WHERE setlist_id=:id ORDER BY position');
+        $songs = $this->db->prepare('SELECT song_id FROM live_worship.setlist_songs WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL ORDER BY position');
         $songs->execute(['id' => $id]);
         $setlist['songs'] = array_map(fn($songId) => $this->songData((int) $songId), $songs->fetchAll(PDO::FETCH_COLUMN));
         return $setlist;
@@ -795,33 +966,30 @@ final class Api
         ];
     }
 
-    private function uploadedPages(): array
-    {
-        if (!isset($_FILES['pages'])) return [];
-        $input = $_FILES['pages'];
-        $files = [];
-        if (is_array($input['name'])) {
-            foreach ($input['name'] as $i => $name) $files[] = ['name' => $name, 'type' => $input['type'][$i] ?? '', 'tmp_name' => $input['tmp_name'][$i], 'error' => $input['error'][$i], 'size' => $input['size'][$i]];
-        } else $files[] = $input;
-        return $files;
-    }
-
-    private function insertPage(int $songId, int $number, array $upload): array
-    {
-        $stored = Files::save($upload);
-        try {
-            $stmt = $this->db->prepare('INSERT INTO live_worship.song_pages (song_id, page_number, image_path, mime_type, file_size_bytes) VALUES (:song_id, :page, :path, :mime, :size) RETURNING id');
-            $stmt->execute(['song_id' => $songId, 'page' => $number, 'path' => $stored['path'], 'mime' => $stored['mime'], 'size' => $stored['size']]);
-            $pageId = (int) $stmt->fetchColumn();
-            return ['id' => $pageId, 'number' => $number, 'mime_type' => $stored['mime'], 'file_size_bytes' => $stored['size'], 'url' => '/api/v1/live-worship/song-pages/' . $pageId, 'storage_path' => $stored['path']];
-        } catch (Throwable $error) { Files::remove($stored['path']); throw $error; }
-    }
-
     private function replaceSetlistSongs(int $setlistId, array $songIds): void
     {
-        $this->db->prepare('DELETE FROM live_worship.setlist_songs WHERE setlist_id=:id')->execute(['id' => $setlistId]);
-        $insert = $this->db->prepare('INSERT INTO live_worship.setlist_songs (setlist_id, song_id, position) VALUES (:setlist, :song, :position)');
-        foreach ($songIds as $index => $songId) $insert->execute(['setlist' => $setlistId, 'song' => $songId, 'position' => $index + 1]);
+        $this->db->prepare(
+            'UPDATE live_worship.setlist_songs
+                SET inactivated_on=now(), inactivated_by=:inactivated_by
+              WHERE setlist_id=:id AND inactivated_on IS NULL AND inactivated_by IS NULL'
+        )->execute(['id' => $setlistId, 'inactivated_by' => $this->member['id']]);
+        $insert = $this->db->prepare(
+            'INSERT INTO live_worship.setlist_songs
+                (setlist_id, song_id, position, activated_on, activated_by, inactivated_on, inactivated_by)
+             VALUES (:setlist, :song, :position, now(), :activated_by, NULL, NULL)
+             ON CONFLICT (setlist_id, song_id) DO UPDATE
+                SET position=EXCLUDED.position,
+                    activated_on=now(), activated_by=EXCLUDED.activated_by,
+                    inactivated_on=NULL, inactivated_by=NULL'
+        );
+        foreach ($songIds as $index => $songId) {
+            $insert->execute([
+                'setlist' => $setlistId,
+                'song' => $songId,
+                'position' => $index + 1,
+                'activated_by' => $this->member['id'],
+            ]);
+        }
     }
 
     private function songIds(mixed $value): array
@@ -833,7 +1001,7 @@ final class Api
         }, $value)));
         if ($ids) {
             $marks = implode(',', array_fill(0, count($ids), '?'));
-            $check = $this->db->prepare("SELECT count(*) FROM live_worship.songs WHERE id IN ({$marks})");
+            $check = $this->db->prepare("SELECT count(*) FROM live_worship.songs WHERE id IN ({$marks}) AND inactivated_on IS NULL AND inactivated_by IS NULL");
             $check->execute($ids);
             if ((int) $check->fetchColumn() !== count($ids)) throw new ApiError(400, 'One or more selected songs no longer exist.');
         }
@@ -842,12 +1010,15 @@ final class Api
 
     private function archiveExpired(): void
     {
-        $this->db->exec("UPDATE live_worship.setlists SET status='archived' WHERE status='active' AND service_at + interval '6 hours' <= now()");
+        $this->db->exec("UPDATE live_worship.setlists
+                            SET inactivated_on=now(), inactivated_by=0
+                          WHERE inactivated_on IS NULL AND inactivated_by IS NULL
+                            AND service_at + interval '6 hours' <= now()");
     }
 
     private function memberById(int $id): array
     {
-        $stmt = $this->db->prepare('SELECT id, role, active FROM live_worship.members WHERE id=:id');
+        $stmt = $this->db->prepare('SELECT id, role, (inactivated_on IS NULL AND inactivated_by IS NULL) AS active FROM live_worship.members WHERE id=:id');
         $stmt->execute(['id' => $id]);
         $member = $stmt->fetch();
         if (!$member) throw new ApiError(404, 'Live Worship member not found.');
@@ -856,7 +1027,7 @@ final class Api
 
     private function ensureAnotherLeader(int $excludingId): void
     {
-        $stmt = $this->db->prepare("SELECT count(*) FROM live_worship.members WHERE active=TRUE AND role='leader' AND id<>:id");
+        $stmt = $this->db->prepare("SELECT count(*) FROM live_worship.members WHERE inactivated_on IS NULL AND inactivated_by IS NULL AND role='leader' AND id<>:id");
         $stmt->execute(['id' => $excludingId]);
         if ((int) $stmt->fetchColumn() === 0) throw new ApiError(400, 'Keep at least one active worship leader.');
     }
@@ -879,5 +1050,23 @@ final class Api
     {
         http_response_code($status);
         echo json_encode($payload, JSON_THROW_ON_ERROR | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    private function recordLoginActivity(
+        ?string $actorId,
+        ?string $tenantId,
+        string $eventType,
+        string $outcome,
+        string $authMode,
+        ?string $usernameHint = null,
+        ?string $failureCode = null
+    ): void {
+        try {
+            LoginTracking::record($this->db, $actorId, $tenantId, $eventType, $outcome, $authMode, LoginTracking::clientKind(), $usernameHint, $failureCode);
+        } catch (Throwable $error) {
+            // Authentication and tenant selection must remain available if the
+            // optional activity ledger is unavailable during a rollout.
+            error_log('Live Worship login activity recording failed: ' . $error->getMessage());
+        }
     }
 }

@@ -8,6 +8,8 @@ export const NAV_ITEMS = [
 export function navigationFor(user) {
   if (!user) return [];
   return user.role === 'admin'
-    ? [...NAV_ITEMS, { to: '/admin/users', label: 'Users', description: 'Manage user accounts and access.' }]
+    ? [...NAV_ITEMS,
+      { to: '/admin/live-worship', label: 'LW Admin', description: 'Monitor Live Worship tenants and catalog review.' },
+      { to: '/admin/users', label: 'Users', description: 'Manage user accounts and access.' }]
     : NAV_ITEMS;
 }

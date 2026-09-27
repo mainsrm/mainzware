@@ -59,6 +59,9 @@ html[data-theme="dark"] .powered-by-mark-light { display: none; }
 html[data-theme="dark"] .powered-by-mark-dark { display: block; }
 
 .main-area { background: #f6f8fb; }
+.support-banner { min-height: 42px; padding: 10px 48px; display: flex; align-items: center; gap: 10px; background: #fff4cf; border-bottom: 1px solid #e8d28a; color: #6b5414; font-size: 13px; }
+.support-banner b { font-weight: 700; }
+.support-banner span { color: #806a2b; }
 .topbar { height: 64px; background: #fff; border-color: #e5eaf1; padding: 0 48px; }
 .crumb { font-size: 13px; color: #718096; }
 .crumb b { color: #26364e; font-weight: 600; }
@@ -219,6 +222,13 @@ html[data-theme="dark"] .powered-by-mark-dark { display: block; }
 .login-divider { display: flex; align-items: center; gap: 12px; margin: 14px 0; color: #98a2b3; font-size: 10px; }
 .login-divider::before, .login-divider::after { content: ''; flex: 1; height: 1px; background: #e3e8f0; }
 .live-worship-login > .button.quiet { width: 100%; }
+.team-chooser { width: min(100%, 420px); display: grid; gap: 8px; margin-top: 22px; }
+.team-choice { width: 100%; min-height: 58px; padding: 12px 14px; color: #394960; background: #fff; border: 1px solid #dfe5ee; border-radius: 9px; display: flex; align-items: center; justify-content: space-between; text-align: left; }
+.team-choice:hover, .team-choice:focus-visible { border-color: #789274; box-shadow: 0 0 0 3px rgba(120, 146, 116, .16); }
+.team-choice span { display: grid; gap: 4px; }
+.team-choice small { color: #718096; }
+.team-chooser > .button { margin-top: 8px; }
+.team-switch-button { color: #526a9b; }
 .account-password-modal { width: min(100%, 450px); }
 
 html[data-theme="dark"] { color-scheme: dark; background: #101722; }
@@ -333,6 +343,8 @@ html[data-theme="dark"] .member-add input,
 html[data-theme="dark"] .member-add select,
 html[data-theme="dark"] .member-row select,
 html[data-theme="dark"] .live-worship-login .field input { background: #182231; border-color: #7489ad; color: #e2e8f0; }
+html[data-theme="dark"] .team-choice { color: #e2e8f0; background: #182231; border-color: #465872; }
+html[data-theme="dark"] .team-choice small { color: #c9d4e3; }
 html[data-theme="dark"] input:focus-visible,
 html[data-theme="dark"] textarea:focus-visible,
 html[data-theme="dark"] select:focus-visible { outline-color: #b9cdf5; }
@@ -961,7 +973,19 @@ html[data-theme="dark"] .is-song-view .song-controls { background: #111b29; bord
 .access-panel .member-row > b { font-size: 14px; overflow-wrap: anywhere; }
 .access-panel .member-auth-type { font-size: 12px; }
 .access-panel .member-list { max-height: min(60dvh, 620px); overflow-y: auto; padding-right: 4px; scrollbar-gutter: stable; }
+.invitation-panel { margin-top: 16px; }
+.invitation-result { display: grid; gap: 6px; max-width: 720px; background: #f4f7f2; border: 1px solid #d9e5d6; border-radius: 8px; padding: 14px; }
+.invitation-result code { color: #244c38; font-size: 16px; font-weight: 700; letter-spacing: .04em; overflow-wrap: anywhere; user-select: all; }
+.invitation-result small { color: #718096; overflow-wrap: anywhere; }
+.invitation-list { max-width: 720px; margin-top: 18px; }
+.invitation-row { min-height: 54px; border-bottom: 1px solid #edf0eb; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.invitation-row span { display: grid; gap: 3px; }
+.invitation-row small { color: #718096; font-size: 12px; }
 html[data-theme="dark"] .access-panel { background: #111b29; border-color: #465872; }
+html[data-theme="dark"] .invitation-result { background: #1d3027; border-color: #486d58; }
+html[data-theme="dark"] .invitation-result code { color: #d2f0d9; }
+html[data-theme="dark"] .invitation-result small,
+html[data-theme="dark"] .invitation-row small { color: #c9d4e3; }
 html[data-theme="dark"] .settings-access-link p { color: #c9d4e3; }
 @media (max-width: 700px) {
   .access-panel { padding: 16px; }

@@ -2,12 +2,126 @@ openapi: 3.1.0
 info:
   title: Live Worship API
   version: 1.0.0
-  description: App-owned song, service, member, and live display API. Musician chord marks store zero-based Unicode character positions in each part's lyrics. Authentication accepts either a MainzWare session or a leader-managed Live Worship account; authorization uses live_worship.members.
+  description: Tenant-aware song, service, member, and live display API. Musician chord marks store zero-based Unicode character positions in each part's lyrics. MainzWare-authenticated tenant requests resolve an immutable tenant UUID to its UUID-derived schema; the older leader-managed account path is a local migration seam only.
 servers:
   - url: /api/v1/live-worship
 security:
   - cookieSession: []
 paths:
+  /onboarding/slug-preview:
+    post:
+      security: []
+      summary: Translate a formal team name into its canonical Live Worship URL slug
+      description: Returns deterministic name translation only. It does not reserve a slug or reveal whether an existing tenant uses it; Create Team performs the authoritative collision check.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '200':
+          description: Canonical team URL slug
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [display_name, slug]
+                properties:
+                  display_name: { type: string }
+                  slug: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+        '422': { description: Team name cannot produce a valid slug }
+  /onboarding/teams:
+    get:
+      summary: List active Live Worship teams for the signed-in MainzWare identity
+      description: Returns the control-plane membership directory for team discovery and switching. Each selected context is still revalidated against the tenant schema.
+      responses:
+        '200': { description: Teams available to the current identity }
+        '401': { description: MainzWare sign-in required }
+    post:
+      summary: Queue creation of a Live Worship team
+      description: Requires a MainzWare-authenticated identity. The web request reserves the canonical slug and queues DevOps provisioning; it does not execute tenant DDL.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [display_name]
+              properties:
+                display_name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '202':
+          description: Team reserved and provisioning queued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, slug, display_name, url_path, provisioning_state, job_state]
+                properties:
+                  id: { type: string, format: uuid }
+                  slug: { type: string }
+                  display_name: { type: string }
+                  url_path: { type: string, example: /live-worship/grace-community-church }
+                  provisioning_state: { type: string, enum: [provisioning] }
+                  job_state: { type: string, enum: [queued] }
+        '401': { description: MainzWare sign-in required }
+        '409': { description: Canonical team slug is already in use }
+        '422': { description: Team name cannot produce a valid slug }
+  /onboarding/teams/join:
+    post:
+      summary: Join a Live Worship team with a one-time invitation code
+      description: Requires a MainzWare-authenticated identity. The invitation token is stored hashed, consumed once, and the new membership is written to the tenant schema inside the same transaction as the invitation decision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^LW-[A-Z0-9_-]{20,80}$' }
+      responses:
+        '201': { description: Team membership created and tenant context selected }
+        '401': { description: MainzWare sign-in required }
+        '404': { description: Invitation is invalid or already consumed }
+        '409': { description: Team unavailable or identity already belongs to the team }
+        '410': { description: Invitation expired }
+  /context:
+    post:
+      summary: Select an active Live Worship tenant context by slug
+      description: Requires MainzWare authentication and active membership in the selected tenant. The web session stores only the tenant UUID; mobile clients should retain and send the returned tenant_id as X-Live-Worship-Tenant-ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slug]
+              properties:
+                slug: { type: string, pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$' }
+      responses:
+        '200': { description: Selected tenant context, including server-resolved subscription state, feature codes, and feature provenance details }
+        '401': { description: MainzWare sign-in required }
+        '403': { description: User is not a member of the selected tenant }
+        '404': { description: Tenant is unavailable }
+        '422': { description: Invalid tenant slug }
+    get:
+      summary: Read the selected Live Worship tenant context
+      parameters:
+        - name: X-Live-Worship-Tenant-ID
+          in: header
+          required: false
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Selected context, or null when none is selected; effective features are resolved server-side from the current subscription and tenant entitlements }
+        '401': { description: MainzWare sign-in required }
+    delete:
+      summary: Clear the web session tenant context
+      responses: { '200': { description: Context cleared } }
   /me/view-mode:
     patch:
       summary: Save the signed-in leader's song view preference
@@ -45,6 +159,13 @@ paths:
       responses:
         '200': { description: Signed in }
         '401': { description: Invalid username or password }
+  /auth/mainzware:
+    post:
+      summary: Switch the current browser session to MainzWare tenant authentication
+      description: Clears temporary standalone Live Worship mode and selected tenant context when a valid MainzWare session is present. This is used during the legacy-to-tenant handoff.
+      responses:
+        '200': { description: MainzWare session selected }
+        '401': { description: MainzWare sign-in required }
   /auth/logout:
     post:
       summary: Sign out of Live Worship
@@ -82,8 +203,40 @@ paths:
       responses: { '200': { description: Logo image } }
   /storage:
     get:
-      summary: Get stored song page count and byte totals (leader only)
+      summary: Get retained upload storage totals (leader only)
+      description: OCR image uploads are transient and are not retained, so song-page totals remain zero. This endpoint is reserved for future tenant-owned storage accounting.
       responses: { '200': { description: Usage totals } }
+  /invitations:
+    get:
+      summary: List team invitations (leader only)
+      responses:
+        '200': { description: Invitations and their current states }
+        '403': { description: Worship leader role required }
+    post:
+      summary: Create a one-time team invitation (leader only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { type: string, enum: [leader, choir, musician], default: choir }
+      responses:
+        '201': { description: Invitation created; the plaintext code is returned once }
+        '403': { description: Worship leader role required }
+  /invitations/{invitationId}:
+    delete:
+      summary: Revoke a pending team invitation (leader only)
+      parameters:
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Invitation revoked }
+        '403': { description: Worship leader role required }
+        '404': { description: Invitation not found or already decided }
   /members:
     get:
       summary: List app members and roles (leader only)
@@ -105,7 +258,8 @@ paths:
       responses: { '201': { description: Song created } }
   /songs/ocr:
     post:
-      summary: Recognize a song page with the private Live Worship PaddleOCR service (leader only)
+      summary: Recognize a temporary song image with the private Live Worship PaddleOCR service (Pro leader only)
+      description: The uploaded image is used only for OCR and is not stored as a song asset after recognition. The advanced-import entitlement is required.
       requestBody:
         required: true
         content:
@@ -136,11 +290,12 @@ paths:
                           minItems: 4
                           maxItems: 4
         '400': { description: Invalid image }
+        '402': { description: Advanced import is not included in the tenant plan }
         '403': { description: Leader role required }
         '503': { description: Private OCR service unavailable }
   /songs/{songId}:
     get:
-      summary: Read a song and its ordered page references
+      summary: Read a structured song chart
       responses: { '200': { description: Song } }
     put:
       summary: Edit a song (leader only)
@@ -151,7 +306,7 @@ paths:
             schema: { $ref: '#/components/schemas/SongInput' }
       responses: { '200': { description: Song updated } }
     delete:
-      summary: Delete a song and its page files (leader only)
+      summary: Inactivate a song (leader only)
       responses: { '200': { description: Song removed } }
   /songs/{songId}/key:
     patch:
@@ -171,14 +326,25 @@ paths:
         '400': { description: Invalid key }
         '403': { description: Leader role required }
         '404': { description: Song not found }
-  /songs/{songId}/pages:
-    post:
-      summary: Append ordered JPEG, PNG, or WebP pages to a song (leader only)
-      responses: { '201': { description: Stored page records, including sizes } }
-  /song-pages/{pageId}:
+  /catalog/songs:
     get:
-      summary: Read a private uploaded page image
-      responses: { '200': { description: Image content } }
+      summary: List songs in the shared Live Worship master catalog
+      description: The catalog is shared reference data. It is not the tenant library until a member imports a song.
+      responses: { '200': { description: Master catalog songs } }
+  /catalog/songs/{songId}/import:
+    post:
+      summary: Import one master catalog song into this tenant library
+      responses:
+        '201': { description: Tenant library snapshot created }
+        '402': { description: Master catalog feature is not included in the tenant plan }
+        '403': { description: Leader role required }
+  /catalog/import-all:
+    post:
+      summary: Import every master catalog song into this tenant library
+      responses:
+        '200': { description: Import count }
+        '402': { description: Master catalog feature is not included in the tenant plan }
+        '403': { description: Leader role required }
   /setlists:
     get:
       summary: List active setlists, or pass status=archived
@@ -214,6 +380,137 @@ paths:
     get:
       summary: Get the currently active service and its live state
       responses: { '200': { description: Current service, or null } }
+  /admin/overview:
+    get:
+      summary: Get platform-wide Live Worship tenant, job, plan, and review counts
+      description: MainzWare administrator support endpoint. It is separate from tenant-member authorization and does not grant migration or DDL access.
+      responses:
+        '200': { description: Platform overview }
+        '403': { description: MainzWare administrator role required }
+  /admin/tenants:
+    get:
+      summary: List Live Worship tenants for platform support
+      parameters:
+        - name: state
+          in: query
+          required: false
+          schema: { type: string, enum: [provisioning, active, suspended, failed, deprovisioning, deprovisioned] }
+      responses:
+        '200': { description: Tenant support summaries }
+        '403': { description: MainzWare administrator role required }
+  /admin/tenants/{tenantId}:
+    get:
+      summary: Read Live Worship tenant support details
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Tenant members, entitlements, and review details }
+        '403': { description: MainzWare administrator role required }
+        '404': { description: Tenant not found }
+  /admin/support-sessions:
+    post:
+      summary: Start a short-lived read-only tenant support session
+      description: Creates an audited support session for the authenticated MainzWare administrator and binds the browser session to one active tenant. Starting another session ends the administrator's previous session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, reason]
+              properties:
+                tenant_id: { type: string, format: uuid }
+                duration_minutes: { type: integer, minimum: 5, maximum: 30, default: 15 }
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '201': { description: Read-only support session and tenant workspace path }
+        '400': { description: Invalid duration, tenant ID, or reason }
+        '403': { description: MainzWare administrator role required }
+        '404': { description: Tenant not found or unavailable }
+  /admin/support-sessions/current:
+    get:
+      summary: Read the current administrator support session
+      responses:
+        '200': { description: Current support session, or null when none is active }
+        '403': { description: MainzWare administrator role required }
+  /admin/support-sessions/{sessionId}:
+    delete:
+      summary: End an administrator support session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Support session ended and audited }
+        '403': { description: MainzWare administrator role required }
+        '404': { description: Support session not found }
+  /admin/login-activity:
+    get:
+      summary: Read recent Live Worship login and tenant access activity
+      description: Returns audited login, logout, and tenant-context events without passwords, session tokens, or raw credential data.
+      parameters:
+        - name: tenant_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: outcome
+          in: query
+          required: false
+          schema: { type: string, enum: [success, failure] }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 100 }
+      responses:
+        '200': { description: Recent login activity }
+        '400': { description: Invalid activity filter }
+        '403': { description: MainzWare administrator role required }
+  /admin/catalog-review:
+    get:
+      summary: List tenant-created songs awaiting master catalog review
+      parameters:
+        - name: review_state
+          in: query
+          required: false
+          schema: { type: string, enum: [pending, approved, rejected, duplicate, ignored, all], default: pending }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200': { description: Catalog review queue }
+        '403': { description: MainzWare administrator role required }
+  /admin/catalog-review/{reviewId}/{decision}:
+    post:
+      summary: Decide whether a tenant-created song enters or matches the master catalog
+      parameters:
+        - name: reviewId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: decision
+          in: path
+          required: true
+          schema: { type: string, enum: [approve, reject, duplicate] }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string, maxLength: 2000 }
+                master_song_id: { type: string, format: uuid, description: Required for duplicate when title/writer matching is insufficient. }
+      responses:
+        '200': { description: Audited catalog review decision }
+        '403': { description: MainzWare administrator role required }
+        '404': { description: Review item or matching master song not found }
+        '409': { description: Review item has already been decided }
+        '422': { description: Review snapshot cannot be admitted to the master catalog }
 components:
   schemas:
     SongInput:

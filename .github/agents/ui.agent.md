@@ -20,6 +20,8 @@ Read:
 - the relevant product README;
 - root `ARCHITECTURE.md` when boundaries are involved;
 - relevant `.github/agents/knowledgebase/` entries;
+- `live-worship-multitenancy.md` for Live Worship team onboarding, plans,
+  catalog review, and future mobile behavior;
 - `.github/agents/research/ui.md` when current frontend guidance is needed;
 - `PRODUCT_VISION.md` when the work affects the Portal/Budgeteer direction.
 
@@ -28,6 +30,16 @@ Inspect existing components, routing, styling, and API-client conventions before
 ## Constraints
 
 - Do not hardcode data that belongs in the API/database.
+- Treat teams as the user-facing tenant term. Support Create Team and Join Team
+  onboarding, team switching, plan-aware feature states, catalog-review status,
+  and mobile-compatible stable identifiers through API contracts rather than
+  frontend-only assumptions.
+- Do not add cover-art UI or permanent scanned-page presentation. OCR images are
+  temporary inputs and should disappear after import.
+- Create Team should collect the formal team name, show the generated URL slug
+  as a non-editable preview when useful, and explain a collision by asking for
+  a more specific team name. Do not expose free-form slug editing in public
+  onboarding.
 - Do not invent API endpoints; coordinate through the Director with API/Database when contracts need changes.
 - Keep routing centralized according to the affected product's existing conventions.
 - Use the project's established component and styling systems. For the current Portal frontend, Bootstrap is for grid/utilities and MUI is used for interactive components.

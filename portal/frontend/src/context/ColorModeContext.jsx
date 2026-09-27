@@ -13,6 +13,7 @@ const AUTHENTICATED_PORTAL_PATHS = new Set([
   '/technical-analysis',
   '/profile',
   '/admin/users',
+  '/admin/live-worship',
 ]);
 
 export function ColorModeProvider({ children }) {

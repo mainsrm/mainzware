@@ -13,6 +13,7 @@ import Profile from './pages/Profile';
 import TechnicalAnalysis from './pages/TechnicalAnalysis';
 import BudgetApp from './pages/BudgetApp';
 import RequireAuth from './components/RequireAuth';
+import LiveWorshipAdmin from './pages/LiveWorshipAdmin';
 
 export default function App() {
   return (
@@ -38,6 +39,14 @@ export default function App() {
             element={
               <RequireAuth adminOnly>
                 <Users />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/live-worship"
+            element={
+              <RequireAuth adminOnly>
+                <LiveWorshipAdmin />
               </RequireAuth>
             }
           />

@@ -5,6 +5,19 @@
 `portal/api/db_migrations/*.sql`, numbered in run order (`001_`, `002_`, ...,
 `020_`). Add new schema changes as the next-numbered file.
 
+Live Worship has separate migration ledgers and must not be added to the portal
+runner:
+
+- `live-worship/api/platform_migrations/*.sql` applies to `lw_control` and
+  `lw_master` through `php live-worship/api/bin/migrate-platform.php`.
+- `live-worship/api/tenant_migrations/*.sql` is applied to each UUID-derived
+  `lw_t_<tenant>` schema by the privileged provisioning/tenant runner.
+- The runtime database user may read/write application rows but must not run
+  tenant or platform DDL; `LIVE_WORSHIP_MIGRATOR_DB_USER` is required when a
+  runtime credential is configured.
+- `015_entitlement_provenance.sql` adds plan/subscription provenance to
+  `lw_control.tenant_entitlements` and backfills active tenants idempotently.
+
 ## How they're tracked
 
 A `schema_migrations` table (one row per applied filename) records what's already
@@ -144,6 +157,22 @@ work; tracked in `security.md`.
 `mainzworld_app` as the credential the running web app connects with.
 `mainzworld_app` keeps ownership of every table and is now the migrator role,
 used only by `bin/migrate_db.php` (via `Database::migratorConnection()`).
+
+Live Worship follows the same boundary with product-specific variables:
+`LIVE_WORSHIP_DB_USER` is the request/runtime role and
+`LIVE_WORSHIP_MIGRATOR_DB_USER` is the provisioning/migration role. Platform
+and tenant migration scripts must use the latter; request handling, workers,
+and admin HTTP endpoints must use the former. A configured runtime user
+without an explicit migrator user is a configuration error:
+`LiveWorship\\Database::migratorConnection()` fails closed instead of silently
+falling back to the runtime credential. Only a local development process with
+no database user configured may fall back to the current PostgreSQL identity.
+This keeps a missing secret from becoming an accidental DDL privilege
+escalation.
+
+`PlatformMigrations::grantRuntimeAccess()` grants runtime USAGE and DML only;
+it does not grant schema ownership or DDL. Tenant provisioning is therefore a
+privileged job boundary, not an operation the public web request can perform.
 
 **Prerequisite:** 027 must already be applied -- the script asserts this and
 refuses to run otherwise, rather than failing on a confusing "schema does not

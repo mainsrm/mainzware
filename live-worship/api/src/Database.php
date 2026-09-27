@@ -14,8 +14,17 @@ final class Database
 
     public static function migratorConnection(): PDO
     {
-        $user = getenv('LIVE_WORSHIP_MIGRATOR_DB_USER') ?: getenv('MAINZWORLD_MIGRATOR_DB_USER') ?: getenv('MAINZWORLD_DB_USER') ?: null;
-        $password = getenv('LIVE_WORSHIP_MIGRATOR_DB_PASSWORD') ?: getenv('MAINZWORLD_MIGRATOR_DB_PASSWORD') ?: getenv('MAINZWORLD_DB_PASSWORD') ?: null;
+        $user = trim((string) (getenv('LIVE_WORSHIP_MIGRATOR_DB_USER') ?: getenv('MAINZWORLD_MIGRATOR_DB_USER') ?: ''));
+        $password = getenv('LIVE_WORSHIP_MIGRATOR_DB_PASSWORD') ?: getenv('MAINZWORLD_MIGRATOR_DB_PASSWORD') ?: null;
+        if ($user === '') {
+            // An entirely unconfigured local checkout may use the developer's
+            // local PostgreSQL identity. Once an application credential is
+            // configured, migrations must name their separate credential;
+            // never silently reuse the runtime role.
+            $runtimeUser = trim((string) (getenv('LIVE_WORSHIP_DB_USER') ?: getenv('MAINZWORLD_DB_USER') ?: ''));
+            if ($runtimeUser !== '') throw new \RuntimeException('Explicit migrator database credentials are required; refusing to reuse the runtime database user.');
+            return self::connect(null, null);
+        }
         return self::connect($user, $password);
     }
 

@@ -14,10 +14,15 @@ final class Access
             $accountId = (int) ($_SESSION['live_worship_account_id'] ?? 0);
             if ($accountId < 1) throw new ApiError(401, 'Sign in to Live Worship.');
             $stmt = Database::connection()->prepare(
-                'SELECT m.id, m.standalone_account_id, m.role, m.active, m.view_mode, m.theme, a.username
+                'SELECT m.id, m.standalone_account_id, m.role,
+                        (m.inactivated_on IS NULL AND m.inactivated_by IS NULL) AS active,
+                        m.view_mode, m.theme, a.username
                    FROM live_worship.members m
-                   JOIN live_worship.standalone_accounts a ON a.id = m.standalone_account_id
-                  WHERE m.standalone_account_id = :account_id AND m.active = TRUE'
+                   JOIN live_worship.standalone_accounts a
+                     ON a.id = m.standalone_account_id
+                    AND a.inactivated_on IS NULL AND a.inactivated_by IS NULL
+                  WHERE m.standalone_account_id = :account_id
+                    AND m.inactivated_on IS NULL AND m.inactivated_by IS NULL'
             );
             $stmt->execute(['account_id' => $accountId]);
             $member = $stmt->fetch();
@@ -32,7 +37,12 @@ final class Access
         $identity = \MainzWorld\Support\Auth::currentUser();
         if ($identity === null) throw new ApiError(401, 'Sign in to Live Worship or MainzWare.');
         $stmt = Database::connection()->prepare(
-            'SELECT id, identity_id, role, active, view_mode, theme FROM live_worship.members WHERE identity_id = :identity_id AND active = TRUE'
+            'SELECT id, identity_id, role,
+                    (inactivated_on IS NULL AND inactivated_by IS NULL) AS active,
+                    view_mode, theme
+               FROM live_worship.members
+              WHERE identity_id = :identity_id
+                AND inactivated_on IS NULL AND inactivated_by IS NULL'
         );
         $stmt->execute(['identity_id' => (int) $identity['id']]);
         $member = $stmt->fetch();

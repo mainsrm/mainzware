@@ -20,6 +20,54 @@ export function send(method, payload) {
   return { method, body: JSON.stringify(payload) };
 }
 
+export function previewTeamSlug(displayName) {
+  return request('/onboarding/slug-preview', send('POST', { display_name: displayName }));
+}
+
+export function createTeam(displayName) {
+  return request('/onboarding/teams', send('POST', { display_name: displayName }));
+}
+
+export function listTeams() {
+  return request('/onboarding/teams');
+}
+
+export function joinTeam(code) {
+  return request('/onboarding/teams/join', send('POST', { code }));
+}
+
+export function selectTeamContext(slug) {
+  return request('/context', send('POST', { slug }));
+}
+
+export function getTeamContext() {
+  return request('/context');
+}
+
+export function clearTeamContext() {
+  return request('/context', { method: 'DELETE' });
+}
+
+// A browser can arrive from the temporary standalone Live Worship path with
+// both a legacy auth mode and a valid MainzWare session. Explicitly select the
+// MainzWare mode before resolving tenant membership so stale legacy state
+// cannot make the tenant route look unauthenticated.
+export function useMainzWareSession() {
+  return request('/auth/mainzware', send('POST', {}));
+}
+
+export function listInvitations() {
+  return request('/invitations');
+}
+
+export function createInvitation(role = 'choir') {
+  return request('/invitations', send('POST', { role }));
+}
+
+export function revokeInvitation(id) {
+  return request(`/invitations/${id}`, { method: 'DELETE' });
+}
+
 export function normalizeSong(song) {
   const rawSections = song.sections || [];
   const baseName = (name) => String(name || '')

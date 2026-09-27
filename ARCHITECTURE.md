@@ -123,6 +123,117 @@ Product boundaries use PostgreSQL schemas (`portal.*`, `budget.*`,
 `.github/agents/knowledgebase/db-migrations.md` for the portal schema split and
 credential runbooks.
 
+### MainzWare tenant standard and Live Worship target
+
+The approved reusable tenant model is a shared control plane plus a
+product-owned tenant resource. Live Worship's public-release target is:
+
+```text
+lw_control       tenant registry, provisioning, billing, support, audit, events
+lw_master        Live Worship master catalog and revisions
+lw_t_<tenant>    one schema per team, named from immutable tenant UUID
+auth             shared MainzWare identities
+```
+
+Team is the user-facing term; tenant/instance is the platform term. The team
+slug is a deterministic URL translation of the submitted display name, such as
+`grace-community-church`; it is only a mutable URL identifier and is never a
+schema name or authorization boundary. The shared slugger transliterates,
+lowercases, hyphenates, enforces the length limit, and rejects reserved route
+words. A collision asks the user for a more specific team name. The provisioner
+creates all tenant feature structures at team creation; plan entitlements determine which
+features are usable.
+
+Mutable business rows use the four-field lifecycle contract
+`activated_on`, `activated_by`, `inactivated_on`, and `inactivated_by`. A row is
+current only when both inactivation fields are null. The paired-null invariant,
+status history, and query/repository scoping are required; new `active` flags
+are not permitted for this model.
+
+Live Worship tenant schemas own team libraries, revisions, members, setlists,
+live state, and future messaging/rotation/scheduling structures. `lw_master`
+owns the master song catalog. Tenant imports are snapshots and tenant-created
+songs can enter a central admin review queue without becoming master songs
+automatically. Original keys and source chart revisions remain recoverable;
+tenant transposition must not mutate the master catalog.
+
+Team creation is a control-plane operation. The web API maps the current
+MainzWare identity to a stable UUID actor, reserves the display-name-derived
+slug, and inserts a queued provisioning job. A privileged DevOps worker creates
+the tenant schema and applies tenant DDL; the web runtime does not execute
+schema creation. A tenant remains unavailable until the worker marks its
+provisioning state `active`.
+
+Team joining is also a control-plane operation. Leader-issued invitations live
+in `lw_control.tenant_invitations`, store only a hash of the one-time token,
+expire after a bounded period, and are consumed transactionally with the
+tenant-schema membership insert. Create, accept, expire, and revoke actions
+write audit events. Invitation records remain outside the tenant schema so
+membership decisions remain support-auditable through deprovisioning.
+
+`lw_control.tenant_memberships` is a rebuildable discovery projection used for
+team lists and switching. It is updated in the same transaction as tenant
+membership mutations and rebuilt by the privileged platform migration, but it
+is not an authorization source: every selected tenant context still verifies
+the actor against the tenant schema's active `members` row.
+
+Tenant deletion follows a delayed deprovisioning job. Pending tenant song
+submissions are copied into durable `lw_control.catalog_review_queue` snapshots
+before the tenant schema is removed, so Live Worship administrators can still
+review them. The worker removes tenant schema/storage only after retention and
+leaves the control-plane tenant tombstone; the URL slug is not reusable before
+that cleanup completes.
+
+Tenant context is explicit: a web slug selection resolves to an active tenant
+UUID and verifies the actor in that tenant's `members` table. Web sessions and
+mobile clients carry only that UUID; no request may choose a PostgreSQL schema
+from user input. The UUID-based tenant runtime now owns tenant-scoped song,
+catalog, setlist, and live-state requests; the older single-instance routes
+remain only as a local migration seam. `/live-worship/` is the common landing,
+login, Create Team, and Join Team route; it never loads tenant song data without
+first selecting an active tenant. A selected or automatically resolved team is
+then routed to `/live-worship/<slug>`.
+
+The local development PTC Worship data has been copied into the first tenant at
+`/live-worship/ptc-worship` by the explicit backfill command. The original
+`live_worship` schema remains untouched as a recovery source during development;
+the backfill does not copy legacy scan-page assets.
+
+MainzWare support access is a separate, explicit path. An administrator starts
+an audited `read_only` support session for one active tenant, bounded to 5–30
+minutes and bound to the administrator's web session. Tenant context represents
+that session as `support` without creating a tenant member row; the runtime
+rejects every non-GET request while it is active. Session replacement, ending,
+expiration, and tenant deprovisioning all terminate the support record. The
+admin portal provides the launch/end controls, and the tenant UI displays the
+read-only state and expiry.
+
+Live Worship also records login and tenant-access activity in the control plane
+for administrator troubleshooting. The ledger stores bounded event metadata,
+actor/tenant references, outcome, authentication mode, and client kind; it does
+not store passwords, bearer tokens, or raw session IDs. The admin portal exposes
+the current three-plan feature matrix and recent login activity. The effective
+tenant feature set is resolved server-side by `Entitlements::resolve()`, using
+the current subscription plus active tenant entitlement rows. Plan-sourced rows
+carry the exact plan and subscription UUID that granted them; explicit grants,
+trials, and overrides remain independently expirable and auditable. `past_due`,
+`canceled`, and `expired` subscriptions do not receive plan features until a
+future billing grace policy explicitly changes that rule. The development
+matrix remains provisional until product pricing and packaging are finalized.
+
+Billing is deliberately provider-neutral. The target contract is a verified
+subscription state with provider product/price references, idempotent
+webhook/event processing, explicit grace-period rules, and server-derived
+tenant entitlements. Billing providers must never become the authorization
+source by themselves. Advanced OCR import is the first currently enforced
+Pro-only capability; future messaging, rotations, scheduling, and push routes
+will use the same entitlement boundary.
+
+Scanned song images are temporary OCR inputs and are deleted after structured
+song content is retained. Live Worship does not include cover-art storage or UI.
+See `.github/agents/knowledgebase/live-worship-multitenancy.md` for the complete
+decision record and remaining public-release work.
+
 The migration credential is split from the runtime credential. **Done
 2026-09-16.** Prod's `public`/now
 `portal`/`budget`/`auth` tables and sequences were owned by `mainzworld_app`;
@@ -133,6 +244,12 @@ the running web app now connects as a new `mainzworld_runtime` role
 for the rollout, the review, and an incident encountered along the way
 (unrelated to the design: a hardcoded credential in the php-fpm pool config
 that isn't wired to `.env`, discovered and documented, not yet fully fixed).
+Live Worship applies the same rule with `LIVE_WORSHIP_DB_USER` for request and
+worker runtime access and `LIVE_WORSHIP_MIGRATOR_DB_USER` for provisioning and
+migrations. Its migrator connection fails closed when a runtime user is set
+without an explicit migrator user; there is no production fallback to the
+runtime role. The Live Worship admin API is a platform authorization surface,
+but it still uses the restricted runtime DB connection and cannot perform DDL.
 
 ## Migration status
 

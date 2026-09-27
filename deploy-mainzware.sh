@@ -68,6 +68,7 @@ cp -a "$STAGING_DIR/extract/frontend" "$REMOTE_ROOT/frontend"
 cp -a "$STAGING_DIR/extract/api" "$REMOTE_ROOT/api"
 mkdir -p "$REMOTE_ROOT/live-worship/api"
 cp -a "$STAGING_DIR/extract/live-worship/api/." "$REMOTE_ROOT/live-worship/api/"
+mkdir -p "$REMOTE_ROOT/live-worship/api/storage"
 mkdir -p "$REMOTE_ROOT/live-worship/ocr"
 cp -a "$STAGING_DIR/extract/live-worship/ocr/." "$REMOTE_ROOT/live-worship/ocr/"
 rm -rf /var/www/SaleAddressMapper
@@ -80,10 +81,8 @@ mkdir -p "$REMOTE_ROOT/api/public/uploads"
 if [ -d "$STAGING_DIR/uploads" ]; then
   cp -a "$STAGING_DIR/uploads/." "$REMOTE_ROOT/api/public/uploads/"
 fi
-mkdir -p "$REMOTE_ROOT/live-worship/api/storage/song-pages"
-
 if [ -f "$REMOTE_ROOT/api/.env" ]; then
-  (set -a; . "$REMOTE_ROOT/api/.env"; set +a; php "$REMOTE_ROOT/api/bin/check_env.php" && php "$REMOTE_ROOT/api/bin/migrate_db.php" && php "$REMOTE_ROOT/live-worship/api/bin/migrate.php")
+  (set -a; . "$REMOTE_ROOT/api/.env"; set +a; php "$REMOTE_ROOT/api/bin/check_env.php" && php "$REMOTE_ROOT/api/bin/migrate_db.php" && php "$REMOTE_ROOT/live-worship/api/bin/migrate.php" && php "$REMOTE_ROOT/live-worship/api/bin/migrate-platform.php" && php "$REMOTE_ROOT/live-worship/api/bin/migrate-tenants.php" && { find "$REMOTE_ROOT/live-worship/api/storage/song-pages" -type f -delete 2>/dev/null || true; })
 else
   echo "WARNING: $REMOTE_ROOT/api/.env not found; skipping migrations (create it and rerun migrate_db.php manually)." >&2
 fi

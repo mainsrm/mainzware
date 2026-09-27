@@ -41,6 +41,21 @@ git -C live-worship/import-sources/worship pull --ff-only
 The importer keeps chord-only rhythm rows such as `/ / /` and positions inline
 chords such as `[B]` and `[E/B]` for musician view.
 
+The repository files are an import source, not a production runtime dependency.
+The importer parses their content into the database and records provenance; it
+does not copy the source files into the application. Live Worship has no
+cover-art scope.
+
+The current importer targets the pre-tenant `live_worship.songs` table. The
+approved target architecture moves curated source records into the shared
+`lw_master` catalog and creates tenant-owned snapshots during import. Tenant
+imports must preserve source IDs, versions, checksums, and original keys.
+
+Photo import uses temporary OCR input only: retain reviewed text and structured
+song data, then discard the uploaded image. The coordinated lifecycle migration
+removes the legacy `song_pages` table and the API no longer stores page files.
+Do not add permanent scan-image storage or cover-art assets.
+
 The frontend paste importer also recognizes Worship Together-style copied charts:
 section headings without colons, markdown-linked writer lines, separate chord
 rows above lyric fragments, and bar rows such as `| B / | F#(add4) / |`. These
@@ -70,7 +85,7 @@ set -a; . api/.env; set +a
 Find an active production leader ID, preview the import, then commit it:
 
 ```sh
-php -r 'require "live-worship/api/src/bootstrap.php"; $db=\LiveWorship\Database::connection(); foreach ($db->query("SELECT id, role, active FROM live_worship.members ORDER BY id") as $r) { echo $r["id"]." | ".$r["role"]." | ".($r["active"] ? "active" : "inactive").PHP_EOL; }'
+php -r 'require "live-worship/api/src/bootstrap.php"; $db=\LiveWorship\Database::connection(); foreach ($db->query("SELECT id, role, (inactivated_on IS NULL AND inactivated_by IS NULL) AS current FROM live_worship.members ORDER BY id") as $r) { echo $r["id"]." | ".$r["role"]." | ".($r["current"] ? "active" : "inactive").PHP_EOL; }'
 
 php live-worship/api/bin/import-onsong.php /tmp/worship-source \
   --member-id=PRODUCTION_LEADER_ID --limit=10
@@ -81,3 +96,8 @@ php live-worship/api/bin/import-onsong.php /tmp/worship-source \
 
 Use the production member ID, which may differ from local development. Do not
 run the local member ID blindly in production.
+
+The member-inspection command above reflects the current single-instance
+implementation. After the lifecycle migration, member inspection must use the
+four-field status contract and treat a row as current only when both
+`inactivated_on` and `inactivated_by` are null.

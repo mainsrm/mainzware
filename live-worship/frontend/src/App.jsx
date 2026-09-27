@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArrowDown, ArrowUp, AudioLines, Calendar, ChevronDown, ChevronLeft, ChevronRight, CirclePlus, Guitar, House, ImagePlus, Library, ListMusic, LockKeyhole, LogOut, Mic, MicOff, Moon, Music2, Pencil, Play, Search, Settings, Sparkles, Sun, Trash2, Upload, Users, X } from 'lucide-react';
-import { normalizeSetlist, normalizeSong, request, send } from './api';
+import { createInvitation, createTeam, joinTeam, listInvitations, listTeams, normalizeSetlist, normalizeSong, request, revokeInvitation, selectTeamContext, send, useMainzWareSession } from './api';
 
 const WHOLE_SONG = 'whole-song';
 // Keep keys in chromatic musical order from C, not lexical or key-signature order.
@@ -99,6 +99,9 @@ export default function App() {
   const [voiceGuideStatus, setVoiceGuideStatus] = useState('idle');
   const [voiceGuideMessage, setVoiceGuideMessage] = useState('');
   const [role, setRole] = useState('choir');
+  const [supportMode, setSupportMode] = useState(false);
+  const [supportExpiresOn, setSupportExpiresOn] = useState(null);
+  const [supportReason, setSupportReason] = useState('');
   const [username, setUsername] = useState('');
   const [authType, setAuthType] = useState('mainzware');
   const [mode, setMode] = useState('choir');
@@ -131,9 +134,18 @@ export default function App() {
   const [memberPassword, setMemberPassword] = useState('');
   const [memberAuthType, setMemberAuthType] = useState('live_worship');
   const [memberRole, setMemberRole] = useState('choir');
+  const [invitations, setInvitations] = useState([]);
+  const [invitationRole, setInvitationRole] = useState('choir');
+  const [latestInvitation, setLatestInvitation] = useState(null);
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
+  const [joinCode, setJoinCode] = useState(() => new URLSearchParams(window.location.search).get('invite') || '');
+  const [availableTeams, setAvailableTeams] = useState([]);
+  const [onboardingName, setOnboardingName] = useState('');
+  const [onboardingError, setOnboardingError] = useState('');
+  const [onboardingMessage, setOnboardingMessage] = useState('');
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('live-worship-theme') === 'dark');
   const [passwordCurrent, setPasswordCurrent] = useState('');
@@ -251,7 +263,7 @@ export default function App() {
       try {
         const [active, archived, me, settings] = await Promise.all([request('/setlists'), request('/setlists?status=archived'), request('/me'), request('/settings')]);
         setSetlists([...active, ...archived].map(normalizeSetlist));
-        setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
+        setRole(me.role); setSupportMode(Boolean(me.support_mode)); setSupportExpiresOn(me.support_expires_on || null); setSupportReason(me.support_reason || ''); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
       } catch (error) {
         if (error.status === 401) setAuthStatus('sign-in');
         else if (error.status === 403) setAuthStatus('not-member');
@@ -321,7 +333,7 @@ export default function App() {
   const showWholeSong = partId === WHOLE_SONG;
   const currentSetlist = setlists.find((item) => item.id === currentSetlistId);
   const currentSongIndex = currentSetlist ? currentSetlist.songIds.indexOf(song?.id) : -1;
-  const roleLabel = role === 'leader' ? 'Worship leader' : role === 'choir' ? 'Choir member' : 'Musician';
+  const roleLabel = supportMode ? 'Read-only support' : role === 'leader' ? 'Worship leader' : role === 'choir' ? 'Choir member' : 'Musician';
   const usernameInitial = username.trim().charAt(0).toUpperCase() || 'U';
   const voiceGuideAvailable = Boolean(speechRecognitionConstructor());
 
@@ -337,10 +349,63 @@ export default function App() {
   }, [view, song?.id, partId, showWholeSong]);
 
   async function refreshApp() {
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    const tenantSlug = pathParts[0] === 'live-worship' && pathParts[1] ? decodeURIComponent(pathParts[1]) : '';
+    const inviteCode = new URLSearchParams(window.location.search).get('invite')?.trim() || '';
+    // Clear a stale standalone-mode marker whenever this app is being opened
+    // with a MainzWare session. This is the handoff from the temporary legacy
+    // site to every new tenant route, including invitation links.
+    try { await useMainzWareSession(); } catch (error) { if (error.status !== 401) throw error; }
+    if (tenantSlug) {
+      await selectTeamContext(tenantSlug);
+      try { setAvailableTeams(await listTeams()); } catch (error) { if (error.status !== 401) throw error; }
+    }
+    else if (inviteCode) {
+      const joined = await joinTeam(inviteCode);
+      window.history.replaceState({}, document.title, `/live-worship/${encodeURIComponent(joined.slug)}`);
+      setJoinCode('');
+      await selectTeamContext(joined.slug);
+      setAvailableTeams(await listTeams());
+    } else {
+      try {
+        const teams = await listTeams();
+        setAvailableTeams(teams);
+        if (teams.length > 1) {
+          setAuthStatus('choose-team');
+          return;
+        }
+        if (teams.length === 1) {
+          window.history.replaceState({}, document.title, `/live-worship/${encodeURIComponent(teams[0].slug)}`);
+          await selectTeamContext(teams[0].slug);
+        } else {
+          // The base URL is the shared landing/onboarding page. Do not fall
+          // through to the legacy single-instance API when this MainzWare
+          // identity has no tenant yet.
+          setAuthStatus('not-member');
+          return;
+        }
+      } catch (error) {
+        if (error.status === 401) {
+          // Keep the original single-instance site usable while it is being
+          // retired. A standalone Live Worship session has no MainzWare team
+          // memberships, but it can still authenticate the legacy API and
+          // load the compatibility catalog from the base URL.
+          try {
+            await request('/me');
+          } catch (legacyError) {
+            if (legacyError.status !== 401) throw legacyError;
+            setAuthStatus('sign-in');
+            return;
+          }
+        } else {
+          throw error;
+        }
+      }
+    }
     const [me, settings, songRows, activeRows, archivedRows, live] = await Promise.all([
       request('/me'), request('/settings'), request('/songs'), request('/setlists'), request('/setlists?status=archived'), request('/live'),
     ]);
-    setRole(me.role); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setMode(me.role === 'leader' ? (me.view_mode || 'choir') : me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
+    setRole(me.role); setSupportMode(Boolean(me.support_mode)); setSupportExpiresOn(me.support_expires_on || null); setSupportReason(me.support_reason || ''); setUsername(me.username || ''); setAuthType(me.auth_type || 'mainzware'); if (me.theme) setDarkMode(me.theme === 'dark'); setMode(me.role === 'leader' ? (me.view_mode || 'choir') : me.role === 'musician' ? 'musician' : 'choir'); setBrand(settings.display_name || 'Live Worship'); setBrandLogo(settings.logo_url || null);
     const normalizedSongs = songRows.map(normalizeSong);
     setSongs(normalizedSongs); setSetlists([...activeRows, ...archivedRows].map(normalizeSetlist));
     setCurrentSetlistId(live ? String(live.setlist_id) : null);
@@ -373,7 +438,10 @@ export default function App() {
     if (view !== 'access') accessReturnView.current = view;
     setModal(''); setView('access'); setSettingsError(''); setSettingsLoading(true);
     window.scrollTo({ top: 0, behavior: 'instant' });
-    try { setMembers(await request('/members')); }
+    try {
+      const [memberRows, invitationRows] = await Promise.all([request('/members'), listInvitations()]);
+      setMembers(memberRows); setInvitations(invitationRows);
+    }
     catch (error) { setSettingsError(error.message || 'Could not load team access.'); }
     finally { setSettingsLoading(false); }
   }
@@ -488,20 +556,6 @@ export default function App() {
     try {
       let saved = draft.id ? await request(`/songs/${draft.id}`, send('PUT', payload)) : await request('/songs', send('POST', payload));
       if (!draft.id) setDraft((current) => ({ ...current, id: String(saved.id) }));
-      for (const pageId of draft.removedPageIds || []) {
-        await request(`/songs/${saved.id}/pages/${pageId}`, { method: 'DELETE' });
-        setDraft((current) => ({ ...current, removedPageIds: current.removedPageIds.filter((id) => id !== pageId) }));
-      }
-      const uploads = draft.pages.filter((page) => page.file);
-      for (const page of uploads) {
-        const form = new FormData(); form.append('pages[]', page.file, page.name);
-        const [stored] = await request(`/songs/${saved.id}/pages`, { method: 'POST', body: form });
-        setDraft((current) => ({ ...current, pages: current.pages.map((item) => {
-          if (item.file !== page.file) return item;
-          const { file, ...rest } = item;
-          return { ...rest, id: stored.id, name: `Page ${stored.number}`, image: stored.url };
-        }) }));
-      }
       await refreshSongsAndLists(); saved = normalizeSong(await request(`/songs/${saved.id}`));
       if (!draft.id) setSongReturnView('catalog');
       setSong(saved); setPartId(WHOLE_SONG); setHighlightedPartId(null); setModal(''); setView('song'); showNotice('Song saved to the catalog');
@@ -661,7 +715,7 @@ export default function App() {
     setHighlightedPartId(part.id);
     try {
       const state = await request(`/setlists/${context.setlistId}/state`, send('PUT', {
-        song_id: Number(context.songId), section_id: part.id, control_mode: 'automatic', controller_token: voiceDeviceTokenRef.current,
+        song_id: context.songId, section_id: part.id, control_mode: 'automatic', controller_token: voiceDeviceTokenRef.current,
       }));
       setControlMode(state?.control_mode || 'automatic');
       setVoiceGuideMessage(`Guiding: ${part.name}`);
@@ -795,7 +849,7 @@ export default function App() {
       catch (error) { showNotice(error.message); return; }
     }
     if (role === 'leader') {
-      try { await request(`/setlists/${item.id}/state`, send('PUT', { song_id: Number(first.id), section_id: null, control_mode: 'manual' })); }
+      try { await request(`/setlists/${item.id}/state`, send('PUT', { song_id: first.id, section_id: null, control_mode: 'manual' })); }
       catch (error) { showNotice(error.message); }
     }
     if (first) openSong(first);
@@ -811,7 +865,7 @@ export default function App() {
     if (role !== 'leader' || !currentSetlistId || !song) return;
     try {
       const state = await request(`/setlists/${currentSetlistId}/state`, send('PUT', {
-        song_id: Number(song.id), section_id: id === WHOLE_SONG ? null : id, control_mode: 'manual',
+        song_id: song.id, section_id: id === WHOLE_SONG ? null : id, control_mode: 'manual',
       }));
       setControlMode(state?.control_mode || 'manual');
     }
@@ -822,7 +876,7 @@ export default function App() {
     if (!next) return;
     openSong(next);
     if (role === 'leader') {
-      try { await request(`/setlists/${currentSetlist.id}/state`, send('PUT', { song_id: Number(next.id), section_id: null, control_mode: 'manual' })); }
+      try { await request(`/setlists/${currentSetlist.id}/state`, send('PUT', { song_id: next.id, section_id: null, control_mode: 'manual' })); }
       catch (error) { showNotice(error.message); }
     }
   }
@@ -855,6 +909,23 @@ export default function App() {
     }
     catch (error) { showNotice(error.message); }
   }
+  async function issueInvitation(event) {
+    event.preventDefault();
+    try {
+      const invitation = await createInvitation(invitationRole);
+      setLatestInvitation(invitation);
+      setInvitations(await listInvitations());
+      showNotice('Invitation created. Copy the code before leaving this screen.');
+    } catch (error) { showNotice(error.message || 'Could not create invitation.'); }
+  }
+  async function cancelInvitation(invitation) {
+    try {
+      await revokeInvitation(invitation.id);
+      setInvitations(await listInvitations());
+      if (latestInvitation?.id === invitation.id) setLatestInvitation(null);
+      showNotice('Invitation revoked');
+    } catch (error) { showNotice(error.message || 'Could not revoke invitation.'); }
+  }
   async function changeMemberRole(member, nextRole) {
     try { await request(`/members/${member.id}`, send('PUT', { role: nextRole })); await refreshSettings(); }
     catch (error) { showNotice(error.message); }
@@ -875,6 +946,56 @@ export default function App() {
       setLoginError(error.message || 'Could not sign in.');
       setAuthStatus(error.status === 403 ? 'not-member' : 'sign-in');
     } finally { setLoading(false); }
+  }
+
+  function goToMainzWareLogin() {
+    const returnPath = `${window.location.pathname}${window.location.search}`;
+    window.location.assign(`/login?return=${encodeURIComponent(returnPath)}`);
+  }
+
+  async function chooseTeam(team) {
+    setOnboardingBusy(true); setOnboardingError(''); setLoading(true); setAuthStatus('checking');
+    try {
+      window.history.replaceState({}, document.title, `/live-worship/${encodeURIComponent(team.slug)}`);
+      await refreshApp();
+      setView('home'); setSong(null);
+    } catch (error) {
+      setConnectionError(error.message || 'Could not open that team.');
+      setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable');
+    } finally { setOnboardingBusy(false); setLoading(false); }
+  }
+
+  function openTeamChooser() {
+    setProfileMenuOpen(false);
+    setOnboardingError('');
+    setAuthStatus('choose-team');
+  }
+
+  async function submitJoin(event) {
+    event.preventDefault();
+    setOnboardingBusy(true); setOnboardingError(''); setOnboardingMessage('');
+    try {
+      const joined = await joinTeam(joinCode.trim());
+      window.history.replaceState({}, document.title, `/live-worship/${encodeURIComponent(joined.slug)}`);
+      setJoinCode('');
+      await refreshApp();
+    } catch (error) {
+      if (error.status === 401) goToMainzWareLogin();
+      else setOnboardingError(error.message || 'Could not join that team.');
+    } finally { setOnboardingBusy(false); }
+  }
+
+  async function submitCreateTeam(event) {
+    event.preventDefault();
+    setOnboardingBusy(true); setOnboardingError(''); setOnboardingMessage('');
+    try {
+      const created = await createTeam(onboardingName.trim());
+      setOnboardingName('');
+      setOnboardingMessage(`${created.display_name} is reserved at /live-worship/${created.slug}. Provisioning must finish before the team can be opened.`);
+    } catch (error) {
+      if (error.status === 401) goToMainzWareLogin();
+      else setOnboardingError(error.message || 'Could not create that team.');
+    } finally { setOnboardingBusy(false); }
   }
 
   async function signOutLiveWorship() {
@@ -900,10 +1021,10 @@ export default function App() {
   }
 
   function renderProfileMenu(menuRef) {
-    return <div className="profile-menu" ref={menuRef}><button type="button" className="profile-menu-trigger" aria-label={`Profile menu for ${username}, ${roleLabel}`} aria-expanded={profileMenuOpen} aria-haspopup="menu" onClick={() => setProfileMenuOpen((open) => !open)} title={`${username} · ${roleLabel}`}><span className="profile-initial" aria-hidden="true">{usernameInitial}</span><span className="profile-menu-copy"><b>{username}</b><small>{roleLabel}</small></span></button>{profileMenuOpen && <div className="profile-menu-panel" role="menu"><div className="profile-menu-identity"><b>{username}</b><small>{roleLabel}</small></div><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setModal('account-password'); }}><LockKeyhole size={15}/> Change password</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); changeTheme(darkMode ? 'light' : 'dark'); }}>{darkMode ? <Sun size={15}/> : <Moon size={15}/>} Turn {darkMode ? 'light' : 'dark'} mode on</button><button type="button" role="menuitem" className="profile-menu-logout" onClick={signOutLiveWorship}><LogOut size={15}/> Log out</button></div>}</div>;
+    return <div className="profile-menu" ref={menuRef}><button type="button" className="profile-menu-trigger" aria-label={`Profile menu for ${username}, ${roleLabel}`} aria-expanded={profileMenuOpen} aria-haspopup="menu" onClick={() => setProfileMenuOpen((open) => !open)} title={`${username} · ${roleLabel}`}><span className="profile-initial" aria-hidden="true">{usernameInitial}</span><span className="profile-menu-copy"><b>{username}</b><small>{roleLabel}</small></span></button>{profileMenuOpen && <div className="profile-menu-panel" role="menu"><div className="profile-menu-identity"><b>{username}</b><small>{roleLabel}</small></div>{authType === 'mainzware' && availableTeams.length > 1 && !supportMode && <button type="button" role="menuitem" onClick={openTeamChooser}><Users size={15}/> Switch team</button>}{!supportMode && <><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); setModal('account-password'); }}><LockKeyhole size={15}/> Change password</button><button type="button" role="menuitem" onClick={() => { setProfileMenuOpen(false); changeTheme(darkMode ? 'light' : 'dark'); }}>{darkMode ? <Sun size={15}/> : <Moon size={15}/>} Turn {darkMode ? 'light' : 'dark'} mode on</button></>}<button type="button" role="menuitem" className="profile-menu-logout" onClick={signOutLiveWorship}><LogOut size={15}/> Log out</button></div>}</div>;
   }
 
-  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Ask a worship leader for access' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'sign-in' ? 'Use the Live Worship account your worship leader gave you.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Ask a worship leader to add it.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button></form>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
+  if (authStatus !== 'ready') return <div className="auth-gate"><div className="auth-gate-mark"><Music2 size={21}/></div><h1>{loading ? 'Connecting to Live Worship' : authStatus === 'choose-team' ? 'Choose a team' : authStatus === 'sign-in' ? 'Sign in to Live Worship' : authStatus === 'not-member' ? 'Join or create a team' : 'Live Worship is unavailable'}</h1><p>{loading ? 'Loading your song catalog and service plans.' : authStatus === 'choose-team' ? 'This MainzWare account belongs to more than one team.' : authStatus === 'sign-in' ? 'Use a Live Worship login, or continue with your MainzWare account to join or create a team.' : authStatus === 'not-member' ? `This account is not yet a member of ${brand}. Join with an invitation or create a new team.` : connectionError || 'Could not load your Live Worship workspace.'}</p>{authStatus === 'choose-team' && <div className="team-chooser">{availableTeams.map((team) => <button className="team-choice" type="button" key={team.tenant_id} onClick={() => chooseTeam(team)} disabled={onboardingBusy}><span><b>{team.display_name}</b><small>{team.role} · /live-worship/{team.slug}</small></span><ChevronRight size={18}/></button>)}<button className="button quiet" type="button" onClick={goToMainzWareLogin}>Use a different MainzWare account</button></div>}{authStatus === 'sign-in' && <form className="live-worship-login" onSubmit={signInLiveWorship}><label className="field">Username<input autoComplete="username" value={loginUsername} onChange={(event) => setLoginUsername(event.target.value)} required/></label><label className="field">Password<input type="password" autoComplete="current-password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} required/></label>{loginError && <div className="login-error" role="alert">{loginError}</div>}<button className="button dark" disabled={loading}>Sign in</button></form>}{['sign-in', 'not-member'].includes(authStatus) && <div className="onboarding-gate"><div className="login-divider"><span>TEAM ONBOARDING</span></div><button className="button quiet" type="button" onClick={goToMainzWareLogin}>Continue with MainzWare</button><form className="onboarding-form" onSubmit={submitJoin}><label className="field">Invitation code<input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="LW-…" pattern="LW-[A-Z0-9_-]{20,80}" required/></label><button className="button secondary" disabled={onboardingBusy}>Join team</button></form><form className="onboarding-form" onSubmit={submitCreateTeam}><label className="field">New team name<input value={onboardingName} onChange={(event) => setOnboardingName(event.target.value)} placeholder="Grace Community Church" maxLength="120" required/></label><button className="button secondary" disabled={onboardingBusy}>Create team</button></form>{onboardingError && <div className="login-error" role="alert">{onboardingError}</div>}{onboardingMessage && <div className="onboarding-success" role="status">{onboardingMessage}</div>}</div>}{authStatus === 'not-member' && <button className="button quiet" onClick={() => { setLoginError(''); setAuthStatus('sign-in'); }}>Use a different account</button>}{authStatus === 'unavailable' && <button className="button quiet" onClick={() => { setLoading(true); refreshApp().catch((error) => { setConnectionError(error.message || 'Could not load your Live Worship workspace.'); setAuthStatus(error.status === 401 ? 'sign-in' : error.status === 403 ? 'not-member' : 'unavailable'); }).finally(() => setLoading(false)); }}>Try again</button>}</div>;
 
   return <div className={`app-frame ${view === 'song' ? 'is-song-view' : ''}`}>
     <aside className="sidebar">
@@ -918,7 +1039,8 @@ export default function App() {
       <a className="powered-by-link sidebar-powered-by" href="/" aria-label="Powered by MainzWare — visit homepage"><span className="powered-by-copy"><span>Powered by:</span><b>MainzWare</b></span><span className="powered-by-mark-wrap" aria-hidden="true"><img className="powered-by-mark powered-by-mark-light" src={MAINZWARE_MARK_LIGHT} alt=""/><img className="powered-by-mark powered-by-mark-dark" src={MAINZWARE_MARK_DARK} alt=""/></span></a>
     </aside>
     <main className="main-area">
-      <header className="topbar"><div className="crumb"><span>{brand}</span><span className="crumb-slash">/</span><b>{view === 'home' ? 'Home' : view === 'catalog' ? 'Song catalog' : view === 'setlists' ? 'Set lists' : view === 'archive' ? 'Archive' : view === 'access' ? 'Manage access' : 'Song view'}</b></div><div className="top-actions"><span className="online-dot" title="Connected to Live Worship"/></div></header>
+      {supportMode && <div className="support-banner" role="status"><b>Read-only support session</b><span>{supportReason || 'MainzWare support is viewing this team.'}{supportExpiresOn ? ` · Expires ${new Date(supportExpiresOn).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</span></div>}
+      <header className="topbar"><div className="crumb"><span>{brand}</span><span className="crumb-slash">/</span><b>{view === 'home' ? 'Home' : view === 'catalog' ? 'Song catalog' : view === 'setlists' ? 'Set lists' : view === 'archive' ? 'Archive' : view === 'access' ? 'Manage access' : 'Song view'}</b></div><div className="top-actions">{authType === 'mainzware' && availableTeams.length > 1 && !supportMode && <button type="button" className="link-button team-switch-button" onClick={openTeamChooser}>Switch team</button>}<span className="online-dot" title="Connected to Live Worship"/></div></header>
       <div className="content">
       {view === 'home' && <>
         <div className="page-heading home-heading"><div><div className="eyebrow">UPCOMING SERVICES</div><h1>Services</h1><p>{activeSetlists.length} planned</p></div></div>
@@ -950,6 +1072,23 @@ export default function App() {
         <div className="page-heading"><div><div className="eyebrow">TEAM SETTINGS</div><h1>Manage access</h1><p>Add people, assign roles, and manage access to your team.</p></div></div>
         <section className="access-panel">{settingsLoading ? <p role="status">Loading team access…</p> : settingsError ? <div role="alert"><p>{settingsError}</p><button className="button secondary" onClick={openManageAccess}>Try again</button></div> : <><div className="modal-divider"><span>TEAM ACCESS</span><small>{members.filter((member) => member.active).length} people</small></div><p className="member-access-help">Create a Live Worship login for beta users, or add someone who already has a MainzWare account. Adding an existing Live Worship username again resets its password.</p><form className="member-add" onSubmit={addMember}><select value={memberAuthType} onChange={(event) => setMemberAuthType(event.target.value)} aria-label="Account type"><option value="live_worship">Live Worship login</option><option value="mainzware">MainzWare account</option></select><input value={memberUsername} onChange={(event) => setMemberUsername(event.target.value)} placeholder="Username" aria-label="New member username" required/>{memberAuthType === 'live_worship' && <input type="password" autoComplete="new-password" value={memberPassword} onChange={(event) => setMemberPassword(event.target.value)} placeholder="Initial password (8+ characters)" aria-label="Initial password" minLength="8" required/>}<select value={memberRole} onChange={(event) => setMemberRole(event.target.value)} aria-label="New member role"><option value="choir">Choir</option><option value="musician">Musician</option><option value="leader">Leader</option></select><button className="button primary"><CirclePlus size={15}/> Add person</button></form><div className="member-list">{sortedMembers.map((member) => <div className="member-row" key={member.id}><div className="role-avatar small-avatar">{(member.username || '?').slice(0, 1).toUpperCase()}</div><b>{member.username}</b><small className="member-auth-type">{member.auth_type === 'live_worship' ? 'Live Worship login' : 'MainzWare account'}</small><select value={member.role} onChange={(event) => changeMemberRole(member, event.target.value)} aria-label={`Role for ${member.username}`}><option value="leader">Leader</option><option value="choir">Choir</option><option value="musician">Musician</option></select><button className="icon-button member-remove" onClick={() => removeMember(member)} title={`Remove ${member.username}`}><X size={14}/></button></div>)}</div>{!sortedMembers.length && <p>No active team members.</p>}</>}</section>
       </>}
+      {view === 'access' && role === 'leader' && <section className="access-panel invitation-panel">
+        <div className="modal-divider"><span>INVITATIONS</span><small>One-time links for MainzWare accounts</small></div>
+        <p className="member-access-help">Create a seven-day invitation for someone who already has a MainzWare account. The code is shown once and can be revoked before it is used.</p>
+        <form className="member-add" onSubmit={issueInvitation}>
+          <select value={invitationRole} onChange={(event) => setInvitationRole(event.target.value)} aria-label="Invitation role">
+            <option value="choir">Choir</option>
+            <option value="musician">Musician</option>
+            <option value="leader">Leader</option>
+          </select>
+          <button className="button primary"><CirclePlus size={15}/> Create invitation</button>
+        </form>
+        {latestInvitation && <div className="invitation-result" role="status"><b>Copy this invitation code:</b><code>{latestInvitation.code}</code><small>Join link: {latestInvitation.url_path}</small></div>}
+        <div className="invitation-list">
+          {invitations.map((invitation) => <div className="invitation-row" key={invitation.id}><span><b>{invitation.role}</b><small>{invitation.invitation_state} · expires {new Date(invitation.expires_on).toLocaleDateString()}</small></span>{invitation.invitation_state === 'pending' && <button type="button" className="button text-button" onClick={() => cancelInvitation(invitation)}>Revoke</button>}</div>)}
+          {!invitations.length && <p className="member-access-help">No invitations have been created for this team.</p>}
+        </div>
+      </section>}
       {view === 'catalog' && <>
         <div className="page-heading catalog-heading"><div><div className="eyebrow">SONG LIBRARY</div><h1>Your songs</h1><p>{songs.length} {songs.length === 1 ? 'song' : 'songs'} in the catalog</p></div>{role === 'leader' && <button className="button primary" onClick={newSong}><CirclePlus size={17}/> Add a song</button>}</div>
         <div className="catalog-tools"><label className="search"><Search size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search songs"/></label></div>

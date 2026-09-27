@@ -72,20 +72,23 @@ sort($files, SORT_NATURAL | SORT_FLAG_CASE);
 if ($limit !== null) $files = array_slice($files, 0, $limit);
 
 $db = Database::connection();
-$member = $db->prepare("SELECT id FROM live_worship.members WHERE id = :id AND role = 'leader' AND active = TRUE");
+$member = $db->prepare("SELECT id FROM live_worship.members WHERE id = :id AND role = 'leader' AND inactivated_on IS NULL AND inactivated_by IS NULL");
 $member->execute(['id' => $memberId]);
 if (!$member->fetchColumn()) { fwrite(STDERR, "Member {$memberId} is not an active Live Worship leader.\n"); exit(1); }
 
 $existingSource = $db->prepare('SELECT id FROM live_worship.songs WHERE import_source = :source AND import_path = :path');
-$existingTitle = $db->prepare("SELECT id FROM live_worship.songs WHERE lower(title) = lower(:title) AND coalesce(lower(writer), '') = coalesce(lower(:writer), '') LIMIT 1");
+$existingTitle = $db->prepare("SELECT id FROM live_worship.songs WHERE lower(title) = lower(:title) AND coalesce(lower(writer), '') = coalesce(lower(:writer), '') AND inactivated_on IS NULL AND inactivated_by IS NULL LIMIT 1");
 $insert = $db->prepare(
     'INSERT INTO live_worship.songs
-        (title, writer, default_key, original_key, lyrics, sections, ocr_text, created_by, import_source, import_path, import_sha256)
-     VALUES (:title, :writer, :song_key, :original_key, :lyrics, CAST(:sections AS jsonb), :ocr_text, :created_by, :source, :path, :sha256)'
+        (title, writer, default_key, original_key, lyrics, sections, ocr_text, created_by,
+         import_source, import_path, import_sha256, activated_on, activated_by)
+     VALUES (:title, :writer, :song_key, :original_key, :lyrics, CAST(:sections AS jsonb),
+             :ocr_text, :created_by, :source, :path, :sha256, now(), :activated_by)'
 );
 $updateSong = $db->prepare(
     'UPDATE live_worship.songs SET title=:title, writer=:writer, default_key=:song_key, original_key=:original_key,
-        lyrics=:lyrics, sections=CAST(:sections AS jsonb), ocr_text=:ocr_text, import_sha256=:sha256, updated_at=now()
+        lyrics=:lyrics, sections=CAST(:sections AS jsonb), ocr_text=:ocr_text, import_sha256=:sha256,
+        activated_on=now(), activated_by=:activated_by, inactivated_on=NULL, inactivated_by=NULL, updated_at=now()
      WHERE id=:id'
 );
 
@@ -125,7 +128,8 @@ foreach ($files as $file) {
             'title' => $song['title'], 'writer' => $song['writer'], 'song_key' => $song['key'],
             'original_key' => $song['key'], 'lyrics' => $song['lyrics'],
             'sections' => json_encode($song['sections'], JSON_THROW_ON_ERROR), 'ocr_text' => '',
-            'created_by' => $memberId, 'source' => SOURCE_REPOSITORY, 'path' => $relativePath, 'sha256' => $hash,
+            'created_by' => $memberId, 'activated_by' => $memberId,
+            'source' => SOURCE_REPOSITORY, 'path' => $relativePath, 'sha256' => $hash,
         ];
         if ($sourceId !== false) {
             $updateSong->execute($params + ['id' => (int) $sourceId]);

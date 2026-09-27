@@ -38,7 +38,27 @@ Read only the relevant documentation needed for the change. In particular:
 - root `ARCHITECTURE.md`;
 - relevant product/service README;
 - relevant knowledgebase entries;
+- `live-worship-multitenancy.md` for Live Worship tenant, lifecycle,
+  provisioning, entitlement, catalog, and mobile decisions;
 - `PRODUCT_VISION.md` when the change affects the current Portal/Budgeteer direction.
+
+For Live Worship changes, specifically check that:
+
+- current-row queries use the paired-null inactivation predicate and no new
+  `active` flag is introduced;
+- tenant schema/resource boundaries are explicit and slug handling does not
+  become a database identifier or authorization boundary;
+- plan-gated features are enforced by the API, not only hidden in the UI;
+- master catalog data and tenant library data cannot be mutated interchangeably;
+- Live Worship request/runtime connections cannot run migrations or DDL, the
+  migrator credential is explicit, and platform admin endpoints are distinct
+  from tenant-member authorization with audit coverage for state changes;
+- OCR uploads are temporary and no cover-art/storage scope has been introduced;
+- provisioning and mobile-facing operations are retry-safe and auditable where
+  applicable.
+- support sessions are explicitly started and ended, expire, remain bound to
+  one tenant/admin browser session, expose no tenant password, and reject every
+  tenant mutation while active; deprovisioning must terminate them.
 
 ## Guardrails
 
